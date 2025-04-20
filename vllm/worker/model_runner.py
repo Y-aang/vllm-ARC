@@ -745,7 +745,7 @@ class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
             request_id=seq_group_metadata.request_id,
             seq_ids=seq_ids,
             is_prompt=is_prompt,
-            block_tables=seq_group_metadata.block_tables,
+            block_tables=seq_group_metadata.block_tables,   # a list of block id
             computed_block_nums=seq_group_metadata.computed_block_nums,
             reinit=True,
             reinit_use_defaults=True,

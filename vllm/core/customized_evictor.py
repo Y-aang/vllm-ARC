@@ -56,7 +56,7 @@ class CustomizedEvictor(Evictor):
         self.free_table[block_id].last_accessed = last_accessed
 
     def _cleanup_if_necessary(self):
-        if len(self.priority_queue) > LRUEvictor.CLEANUP_THRESHOLD * len(
+        if len(self.priority_queue) > CustomizedEvictor.CLEANUP_THRESHOLD * len(
                 self.free_table):
             self._cleanup()
 

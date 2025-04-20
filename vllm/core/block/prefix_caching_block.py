@@ -179,7 +179,10 @@ class PrefixCachingBlockAllocator(BlockAllocator):
                                             physical_block_id=None,
                                             extra_hash=extra_hash)
         assert block.content_hash is not None
-
+        
+        # print("block.content_hash:", block.content_hash)
+        with open("/home/shenyang/tests/result/block_log.txt", "a") as f:
+            f.write(str(block.content_hash) + " ")
         cached_block_id = self._cached_blocks.get(block.content_hash, None)
         if cached_block_id is not None:
             self.metric_data.query(hit=True)

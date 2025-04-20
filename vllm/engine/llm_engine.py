@@ -1339,6 +1339,8 @@ class LLMEngine:
             (seq_group_metadata_list, scheduler_outputs,
              allow_async_output_proc
              ) = self.scheduler[virtual_engine].schedule()
+            gpu_hit_rate = self.scheduler[virtual_engine].get_prefix_cache_hit_rate(Device.GPU)
+            print("gpu_hit_rate:", gpu_hit_rate)
 
             ctx.seq_group_metadata_list = seq_group_metadata_list
             ctx.scheduler_outputs = scheduler_outputs

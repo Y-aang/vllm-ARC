@@ -311,10 +311,16 @@ class CacheMetricData:
     num_incompleted_block_queries: int = 0
     num_incompleted_block_hit: int = 0
     block_size: int = 1000
+    
+    hit_count = 0
+    access_count = 0
 
     def query(self, hit: bool):
         self.num_incompleted_block_queries += 1
         self.num_incompleted_block_hit += 1 if hit else 0
+        
+        self.access_count += 1
+        self.hit_count += 1 if hit else 0
 
         # When a block is completed, update the cache hit rate
         # and reset the incomplete numbers.
@@ -342,7 +348,9 @@ class CacheMetricData:
             incompleted_hit_rate = (self.num_incompleted_block_hit /
                                     self.num_incompleted_block_queries)
             incompleted_block_hit = (incompleted_hit_rate * incomplete_ratio)
-        return (completed_block_hit + incompleted_block_hit) / total_blocks
+        # return (completed_block_hit + incompleted_block_hit) / total_blocks
+        print(f"hit: {self.hit_count} access: {self.access_count}")
+        return self.hit_count / self.access_count if self.access_count != 0 else 0
 
 
 def get_all_blocks_recursively(last_block: Block) -> List[Block]:
