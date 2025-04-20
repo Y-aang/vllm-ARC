@@ -2,82 +2,74 @@ import heapq
 from typing import Dict, List, Tuple
 from vllm.core.evictor import BlockMetaData
 from vllm.core.evictor import Evictor
+from collections import OrderedDict, deque
 
 class CustomizedEvictor(Evictor):
-    """Evicts in a least-recently-used order using the last_accessed timestamp
-    that's recorded in the Block. If there are multiple blocks with
-    the same last_accessed time, then the one with the largest num_hashed_tokens
-    will be evicted. If two blocks each have the lowest last_accessed time and
-    highest num_hashed_tokens value, then one will be chose arbitrarily
-    """
 
-    # CLEANUP_THRESHOLD determines the maximum allowable size of the priority
-    # queue relative to the free table size. When this threshold is exceeded,
-    # a cleanup operation is triggered to reduce memory usage.
-    CLEANUP_THRESHOLD = 50
-
-    def __init__(self):
-        self.free_table: Dict[int, BlockMetaData] = {}
-        self.priority_queue = []
+    def __init__(self, max_size:int=134, k:int=50):
+        self.max_size = max_size
+        self.k = k
+        self.A1in: OrderedDict[int, BlockMetaData] = OrderedDict()
+        self.Am: OrderedDict[int, BlockMetaData] = OrderedDict()
+        self.A1out: Deque[int] = deque(maxlen=self.k)
 
     def __contains__(self, block_id: int) -> bool:
-        return block_id in self.free_table
+        return block_id in self.A1in or block_id in self.Am
 
     def evict(self) -> Tuple[int, int]:
-        if len(self.free_table) == 0:
-            raise ValueError("No usable cache memory left")
-
-        while self.priority_queue:
-            # We do not remove outdated entries from the priority queue at the
-            # time of updating the last_accessed timestamp. Instead, outdated
-            # entries are filtered out here during eviction. Outdated entries
-            # would either not in the free table, or have older last accessed
-            # time.
-            last_accessed, _, block_id, content_hash = heapq.heappop(
-                self.priority_queue)
-            if (block_id in self.free_table and
-                    self.free_table[block_id].last_accessed == last_accessed):
-                self.free_table.pop(block_id)
-                return block_id, content_hash
-
-        raise ValueError("No usable cache memory left")
-
+        print('[EVICT] len(self.A1in, A1out, Am):', len(self.A1in), len(self.A1out), len(self.Am))
+        if len(self.A1in) > self.k:
+            block_id, meta = self.A1in.popitem(last=False)
+            self.A1out.append(block_id)
+            return block_id, meta.content_hash
+        elif len(self.Am) > self.max_size - self.k:
+            block_id, meta = self.Am.popitem(last=False)
+            return block_id, meta.content_hash
+        elif self.A1in:
+            block_id, meta = self.A1in.popitem(last=False)
+            self.A1out.append(block_id)
+            return block_id, meta.content_hash
+        elif self.Am:
+            block_id, meta = self.Am.popitem(last=False)
+            return block_id, meta.content_hash
+        raise RuntimeError("No block available to evict")
+    
     def add(self, block_id: int, content_hash: int, num_hashed_tokens: int,
             last_accessed: float):
-        self.free_table[block_id] = BlockMetaData(content_hash,
-                                                  num_hashed_tokens,
-                                                  last_accessed)
-        heapq.heappush(
-            self.priority_queue,
-            (last_accessed, -num_hashed_tokens, block_id, content_hash))
-        self._cleanup_if_necessary()
+        print('[ADD] len(self.A1in, A1out, Am):', len(self.A1in), len(self.A1out), len(self.Am))
+        meta = BlockMetaData(content_hash, num_hashed_tokens, last_accessed)
+
+        if block_id in self.Am:     # Already in Am → refresh LRU position
+            self.Am.move_to_end(block_id)
+            return
+        if block_id in self.A1in:   # Already in A1in → no-op
+            return
+        if block_id in self.A1out:  # Ghost hit → promote to Am
+            self.A1out.remove(block_id)
+            self._add_to_Am(block_id, meta)
+        else:                       # First time → insert into A1in
+            self.A1in[block_id] = meta
 
     def update(self, block_id: int, last_accessed: float):
-        self.free_table[block_id].last_accessed = last_accessed
-
-    def _cleanup_if_necessary(self):
-        if len(self.priority_queue) > CustomizedEvictor.CLEANUP_THRESHOLD * len(
-                self.free_table):
-            self._cleanup()
-
-    def _cleanup(self):
-        new_priority_queue: List[Tuple[float, int, int, int]] = []
-
-        for block_id, block in self.free_table.items():
-            new_priority_queue.append(
-                (block.last_accessed, -block.num_hashed_tokens, block_id,
-                 block.content_hash))
-        heapq.heapify(new_priority_queue)
-
-        self.priority_queue = new_priority_queue
+        if block_id in self.A1in:
+            self.A1in[block_id].last_accessed = last_accessed
+        elif block_id in self.Am:
+            self.Am[block_id].last_accessed = last_accessed
+            self.Am.move_to_end(block_id)
 
     def remove(self, block_id: int):
-        if block_id not in self.free_table:
-            raise ValueError(
-                "Attempting to remove block that's not in the evictor")
-        self.free_table.pop(block_id)
+        if block_id in self.A1in:
+            self.A1in.pop(block_id)
+        elif block_id in self.Am:
+            self.Am.pop(block_id)
+        else:
+            raise ValueError(f"Block {block_id} not tracked")
         
 
     @property
     def num_blocks(self) -> int:
-        return len(self.free_table)
+        return len(self.A1in) + len(self.Am)
+    
+    def _add_to_Am(self, block_id: int, meta: BlockMetaData):
+        self.Am[block_id] = meta
+        self.Am.move_to_end(block_id)

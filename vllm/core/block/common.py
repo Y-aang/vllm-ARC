@@ -349,7 +349,7 @@ class CacheMetricData:
                                     self.num_incompleted_block_queries)
             incompleted_block_hit = (incompleted_hit_rate * incomplete_ratio)
         # return (completed_block_hit + incompleted_block_hit) / total_blocks
-        print(f"hit: {self.hit_count} access: {self.access_count}")
+        # print(f"hit: {self.hit_count} access: {self.access_count}")
         return self.hit_count / self.access_count if self.access_count != 0 else 0
 
 

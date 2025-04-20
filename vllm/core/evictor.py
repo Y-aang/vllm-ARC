@@ -232,6 +232,7 @@ def make_evictor(eviction_policy: EvictionPolicy) -> Evictor:
         return LRUEvictor()
     elif eviction_policy == EvictionPolicy.CUSTOMIZED:
         from vllm.core.customized_evictor import CustomizedEvictor
+        # return LRUEvictor()
         return CustomizedEvictor()
     else:
         raise ValueError(f"Unknown cache eviction policy: {eviction_policy}")
