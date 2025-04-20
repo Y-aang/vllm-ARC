@@ -6,7 +6,7 @@ from collections import OrderedDict, deque
 
 class CustomizedEvictor(Evictor):
 
-    def __init__(self, max_size:int=134, k:int=50):
+    def __init__(self, max_size: int=134, k: int=50):
         self.max_size = max_size
         self.k = k
         self.A1in: OrderedDict[int, BlockMetaData] = OrderedDict()

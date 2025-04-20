@@ -227,12 +227,12 @@ class LRUEvictor(Evictor):
 #         return len(self.free_table)
 
 
-def make_evictor(eviction_policy: EvictionPolicy) -> Evictor:
+def make_evictor(eviction_policy: EvictionPolicy, num_blocks: int) -> Evictor:
     if eviction_policy == EvictionPolicy.LRU:
         return LRUEvictor()
     elif eviction_policy == EvictionPolicy.CUSTOMIZED:
         from vllm.core.customized_evictor import CustomizedEvictor
         # return LRUEvictor()
-        return CustomizedEvictor()
+        return CustomizedEvictor(num_blocks, int(num_blocks * 0.25))
     else:
         raise ValueError(f"Unknown cache eviction policy: {eviction_policy}")

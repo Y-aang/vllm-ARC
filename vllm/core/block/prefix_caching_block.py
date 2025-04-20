@@ -119,7 +119,7 @@ class PrefixCachingBlockAllocator(BlockAllocator):
         # Evitor used to maintain how we want to handle those computed blocks
         # if we find memory pressure is high.
         self.eviction_policy = eviction_policy
-        self.evictor: Evictor = make_evictor(self.eviction_policy)
+        self.evictor: Evictor = make_evictor(self.eviction_policy, num_blocks=num_blocks)
 
         # We share the refcounter between allocators. This allows us to promote
         # blocks originally allocated in the hashless allocator to immutable
