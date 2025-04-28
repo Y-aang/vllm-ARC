@@ -114,6 +114,7 @@ class LRUEvictor(Evictor):
         self.free_table[block_id] = BlockMetaData(content_hash,
                                                   num_hashed_tokens,
                                                   last_accessed)
+        # print('[ADD]', (last_accessed, -num_hashed_tokens, block_id, content_hash))
         heapq.heappush(
             self.priority_queue,
             (last_accessed, -num_hashed_tokens, block_id, content_hash))
@@ -231,8 +232,9 @@ def make_evictor(eviction_policy: EvictionPolicy, num_blocks: int) -> Evictor:
     if eviction_policy == EvictionPolicy.LRU:
         return LRUEvictor()
     elif eviction_policy == EvictionPolicy.CUSTOMIZED:
-        from vllm.core.customized_evictor import CustomizedEvictor
+        from vllm.core.customized_evictor import Customized2QEvictor, CustomizedLRUEvictor
+        return Customized2QEvictor(num_blocks, int(num_blocks * 1.0))
         # return LRUEvictor()
-        return CustomizedEvictor(num_blocks, int(num_blocks * 0.25))
+        # return CustomizedLRUEvictor()
     else:
         raise ValueError(f"Unknown cache eviction policy: {eviction_policy}")

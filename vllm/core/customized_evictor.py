@@ -4,7 +4,7 @@ from vllm.core.evictor import BlockMetaData
 from vllm.core.evictor import Evictor
 from collections import OrderedDict, deque
 
-class CustomizedEvictor(Evictor):
+class Customized2QEvictor(Evictor):
 
     def __init__(self, max_size: int=134, k: int=50):
         self.max_size = max_size
@@ -17,7 +17,7 @@ class CustomizedEvictor(Evictor):
         return block_id in self.A1in or block_id in self.Am
 
     def evict(self) -> Tuple[int, int]:
-        print('[EVICT] len(self.A1in, A1out, Am):', len(self.A1in), len(self.A1out), len(self.Am))
+        # print('[EVICT] len(self.A1in, A1out, Am):', len(self.A1in), len(self.A1out), len(self.Am))
         if len(self.A1in) > self.k:
             block_id, meta = self.A1in.popitem(last=False)
             self.A1out.append(block_id)
@@ -36,21 +36,25 @@ class CustomizedEvictor(Evictor):
     
     def add(self, block_id: int, content_hash: int, num_hashed_tokens: int,
             last_accessed: float):
-        print('[ADD] len(self.A1in, A1out, Am):', len(self.A1in), len(self.A1out), len(self.Am))
+        # print('[ADD] len(self.A1in, A1out, Am):', len(self.A1in), len(self.A1out), len(self.Am))
         meta = BlockMetaData(content_hash, num_hashed_tokens, last_accessed)
 
         if block_id in self.Am:     # Already in Am → refresh LRU position
             self.Am.move_to_end(block_id)
             return
         if block_id in self.A1in:   # Already in A1in → no-op
+            self.A1in.pop(block_id)
+            self._add_to_Am(block_id, meta)
             return
         if block_id in self.A1out:  # Ghost hit → promote to Am
             self.A1out.remove(block_id)
             self._add_to_Am(block_id, meta)
-        else:                       # First time → insert into A1in
-            self.A1in[block_id] = meta
+            return
+        self.A1in[block_id] = meta  # First time → insert into A1in
+        self.A1in.move_to_end(block_id)
 
     def update(self, block_id: int, last_accessed: float):
+        assert False
         if block_id in self.A1in:
             self.A1in[block_id].last_accessed = last_accessed
         elif block_id in self.Am:
@@ -61,6 +65,7 @@ class CustomizedEvictor(Evictor):
         if block_id in self.A1in:
             self.A1in.pop(block_id)
         elif block_id in self.Am:
+            # assert False
             self.Am.pop(block_id)
         else:
             raise ValueError(f"Block {block_id} not tracked")
@@ -73,3 +78,42 @@ class CustomizedEvictor(Evictor):
     def _add_to_Am(self, block_id: int, meta: BlockMetaData):
         self.Am[block_id] = meta
         self.Am.move_to_end(block_id)
+
+
+class CustomizedLRUEvictor(Evictor):
+
+    def __init__(self):
+        self.cache: [int, BlockMetaData] = OrderedDict()
+
+    def __contains__(self, block_id: int) -> bool:
+        return block_id in self.cache
+
+    def evict(self) -> Tuple[int, int]:
+        # print('[EVICT] len(self.A1in, A1out, Am):', len(self.A1in), len(self.A1out), len(self.Am))
+        if self.cache:
+            block_id, meta = self.cache.popitem(last=False)
+            return block_id, meta.content_hash
+        raise RuntimeError("No block available to evict")
+    
+    def add(self, block_id: int, content_hash: int, num_hashed_tokens: int,
+            last_accessed: float):
+        # print('[ADD] len(self.A1in, A1out, Am):', len(self.A1in), len(self.A1out), len(self.Am))
+        assert block_id not in self.cache
+        meta = BlockMetaData(content_hash, num_hashed_tokens, last_accessed)
+        self.cache[block_id] = meta
+        self.cache.move_to_end(block_id)
+        
+    def update(self, block_id: int, last_accessed: float):
+        assert False
+        if block_id in self.cache:
+            self.cache[block_id].last_accessed = last_accessed
+
+    def remove(self, block_id: int):
+        if block_id in self.cache:
+            self.cache.pop(block_id)
+        else:
+            raise ValueError(f"Block {block_id} not tracked")
+        
+    @property
+    def num_blocks(self) -> int:
+        return len(self.cache)
