@@ -121,6 +121,7 @@ class LRUEvictor(Evictor):
         self._cleanup_if_necessary()
 
     def update(self, block_id: int, last_accessed: float):
+        assert False
         self.free_table[block_id].last_accessed = last_accessed
 
     def _cleanup_if_necessary(self):

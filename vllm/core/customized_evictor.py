@@ -97,8 +97,8 @@ class CustomizedDBLEvictor(Evictor):
         self.Am_priority_queue: List[Tuple[float, int, int, int]] = []
 
         # Ghost queues for tracking evicted entries
-        self.A1out_ghost: deque[int] = deque(maxlen=self.max_size * 10)
-        self.Amout_ghost: deque[int] = deque(maxlen=self.max_size * 10)
+        self.A1out_ghost: deque[int] = deque(maxlen=self.max_size * 100)
+        self.Amout_ghost: deque[int] = deque(maxlen=self.max_size * 100)
 
     def __contains__(self, block_id: int) -> bool:
         return block_id in self.A1in_free_table or block_id in self.Am_free_table
@@ -121,6 +121,7 @@ class CustomizedDBLEvictor(Evictor):
         - No eviction should occur here; eviction is driven externally.
         - Blocks must not already exist in A1in or Am.
         """
+        # print(f"DBLCache A1: {len(self.A1in_free_table)}, Am: {len(self.Am_free_table)}")
         # Ensure this is a new registration
         assert block_id not in self.A1in_free_table and block_id not in self.Am_free_table, \
             f"Block {block_id} unexpectedly already tracked"
@@ -170,8 +171,10 @@ class CustomizedDBLEvictor(Evictor):
     def remove(self, block_id: int):
         if block_id in self.A1in_free_table:
             self.A1in_free_table.pop(block_id)
+            self.A1out_ghost.append(block_id)
         elif block_id in self.Am_free_table:
             self.Am_free_table.pop(block_id)
+            self.Amout_ghost.append(block_id)
         else:
             raise ValueError(f"Attempting to remove non-tracked block {block_id}")
 
@@ -186,7 +189,7 @@ class CustomizedDBLEvictor(Evictor):
             if (block_id in self.A1in_free_table and
                     self.A1in_free_table[block_id].last_accessed == last_accessed):
                 self.A1in_free_table.pop(block_id)
-                self.A1out_ghost.append(block_id)
+                # self.A1out_ghost.append(block_id)
                 return block_id, content_hash
         raise ValueError("No usable block left in A1in to evict")
 
@@ -197,7 +200,7 @@ class CustomizedDBLEvictor(Evictor):
             if (block_id in self.Am_free_table and
                     self.Am_free_table[block_id].last_accessed == last_accessed):
                 self.Am_free_table.pop(block_id)
-                self.Amout_ghost.append(block_id)
+                # self.Amout_ghost.append(block_id)
                 return block_id, content_hash
         raise ValueError("No usable block left in Am to evict")
 
