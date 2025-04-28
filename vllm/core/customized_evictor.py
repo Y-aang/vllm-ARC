@@ -3,6 +3,7 @@ from typing import Dict, List, Tuple
 from vllm.core.evictor import BlockMetaData
 from vllm.core.evictor import Evictor
 from collections import OrderedDict, deque
+from typing import Dict, List, Tuple
 
 class Customized2QEvictor(Evictor):
 
@@ -79,6 +80,141 @@ class Customized2QEvictor(Evictor):
         self.Am[block_id] = meta
         self.Am.move_to_end(block_id)
 
+
+class CustomizedDBLEvictor(Evictor):
+    CLEANUP_THRESHOLD = 50  # Threshold to trigger heap cleanup
+
+    def __init__(self, max_size: int = 134, k: int = 67):
+        self.max_size = max_size
+        self.k = k
+
+        # Free tables for active entries
+        self.A1in_free_table: Dict[int, BlockMetaData] = {}
+        self.Am_free_table: Dict[int, BlockMetaData] = {}
+
+        # Priority queues for eviction order: (last_accessed, -tokens, block_id, content_hash)
+        self.A1in_priority_queue: List[Tuple[float, int, int, int]] = []
+        self.Am_priority_queue: List[Tuple[float, int, int, int]] = []
+
+        # Ghost queues for tracking evicted entries
+        self.A1out_ghost: deque[int] = deque(maxlen=self.max_size * 10)
+        self.Amout_ghost: deque[int] = deque(maxlen=self.max_size * 10)
+
+    def __contains__(self, block_id: int) -> bool:
+        return block_id in self.A1in_free_table or block_id in self.Am_free_table
+
+    def evict(self) -> Tuple[int, int]:
+        # Always evict from A1in if available, else from Am
+        if len(self.A1in_free_table) > self.k:
+            return self._evict_from_A1in()
+        elif len(self.Am_free_table) > self.max_size - self.k:
+            return self._evict_from_Am()
+        elif self.A1in_free_table:
+            return self._evict_from_A1in()
+        if self.Am_free_table:
+            return self._evict_from_Am()
+        raise ValueError("No usable cache memory left")
+
+    def add(self, block_id: int, content_hash: int, num_hashed_tokens: int, last_accessed: float):
+        """
+        Register a block for future eviction:
+        - No eviction should occur here; eviction is driven externally.
+        - Blocks must not already exist in A1in or Am.
+        """
+        # Ensure this is a new registration
+        assert block_id not in self.A1in_free_table and block_id not in self.Am_free_table, \
+            f"Block {block_id} unexpectedly already tracked"
+
+        meta = BlockMetaData(content_hash, num_hashed_tokens, last_accessed)
+
+        # assert block_id in self.A1out_ghost or block_id in self.Amout_ghost
+        # Promote from A1out ghost to Am if ghost hit
+        if block_id in self.A1out_ghost:
+            self.A1out_ghost.remove(block_id)
+            self.Am_free_table[block_id] = meta
+            heapq.heappush(
+                self.Am_priority_queue,
+                (last_accessed, -num_hashed_tokens, block_id, content_hash)
+            )
+            self._cleanup_if_necessary(self.Am_priority_queue, self.Am_free_table)
+            return
+
+        # Promote from Amout ghost to Am if ghost hit
+        if block_id in self.Amout_ghost:
+            self.Amout_ghost.remove(block_id)
+            self.Am_free_table[block_id] = meta
+            heapq.heappush(
+                self.Am_priority_queue,
+                (last_accessed, -num_hashed_tokens, block_id, content_hash)
+            )
+            self._cleanup_if_necessary(self.Am_priority_queue, self.Am_free_table)
+            return
+
+        # Insert into A1in for new block
+        self.A1in_free_table[block_id] = meta
+        heapq.heappush(
+            self.A1in_priority_queue,
+            (last_accessed, -num_hashed_tokens, block_id, content_hash)
+        )
+        self._cleanup_if_necessary(self.A1in_priority_queue, self.A1in_free_table)
+
+    def update(self, block_id: int, last_accessed: float):
+        # Only update last_accessed in free tables; add will not see existing blocks
+        if block_id in self.A1in_free_table:
+            self.A1in_free_table[block_id].last_accessed = last_accessed
+        elif block_id in self.Am_free_table:
+            self.Am_free_table[block_id].last_accessed = last_accessed
+        else:
+            raise ValueError(f"Attempting to update non-tracked block {block_id}")
+
+    def remove(self, block_id: int):
+        if block_id in self.A1in_free_table:
+            self.A1in_free_table.pop(block_id)
+        elif block_id in self.Am_free_table:
+            self.Am_free_table.pop(block_id)
+        else:
+            raise ValueError(f"Attempting to remove non-tracked block {block_id}")
+
+    @property
+    def num_blocks(self) -> int:
+        return len(self.A1in_free_table) + len(self.Am_free_table)
+
+    def _evict_from_A1in(self) -> Tuple[int, int]:
+        # Evict oldest from A1in and record to ghost
+        while self.A1in_priority_queue:
+            last_accessed, neg_tokens, block_id, content_hash = heapq.heappop(self.A1in_priority_queue)
+            if (block_id in self.A1in_free_table and
+                    self.A1in_free_table[block_id].last_accessed == last_accessed):
+                self.A1in_free_table.pop(block_id)
+                self.A1out_ghost.append(block_id)
+                return block_id, content_hash
+        raise ValueError("No usable block left in A1in to evict")
+
+    def _evict_from_Am(self) -> Tuple[int, int]:
+        # Evict oldest from Am and record to ghost
+        while self.Am_priority_queue:
+            last_accessed, neg_tokens, block_id, content_hash = heapq.heappop(self.Am_priority_queue)
+            if (block_id in self.Am_free_table and
+                    self.Am_free_table[block_id].last_accessed == last_accessed):
+                self.Am_free_table.pop(block_id)
+                self.Amout_ghost.append(block_id)
+                return block_id, content_hash
+        raise ValueError("No usable block left in Am to evict")
+
+    def _cleanup_if_necessary(self, queue: List[Tuple[float, int, int, int]], table: Dict[int, BlockMetaData]):
+        if len(queue) > self.CLEANUP_THRESHOLD * len(table):
+            self._cleanup(queue, table)
+
+    def _cleanup(self, queue: List[Tuple[float, int, int, int]], table: Dict[int, BlockMetaData]):
+        new_queue = []
+        for block_id, meta in table.items():
+            new_queue.append((meta.last_accessed, -meta.num_hashed_tokens, block_id, meta.content_hash))
+        heapq.heapify(new_queue)
+
+        if table is self.A1in_free_table:
+            self.A1in_priority_queue = new_queue
+        else:
+            self.Am_priority_queue = new_queue
 
 class CustomizedLRUEvictor(Evictor):
 

@@ -232,8 +232,9 @@ def make_evictor(eviction_policy: EvictionPolicy, num_blocks: int) -> Evictor:
     if eviction_policy == EvictionPolicy.LRU:
         return LRUEvictor()
     elif eviction_policy == EvictionPolicy.CUSTOMIZED:
-        from vllm.core.customized_evictor import Customized2QEvictor, CustomizedLRUEvictor
-        return Customized2QEvictor(num_blocks, int(num_blocks * 1.0))
+        from vllm.core.customized_evictor import Customized2QEvictor, CustomizedLRUEvictor, CustomizedDBLEvictor
+        # return Customized2QEvictor(num_blocks, int(num_blocks * 1.0))
+        return CustomizedDBLEvictor(max_size=num_blocks, k=int(num_blocks * 0.5))
         # return LRUEvictor()
         # return CustomizedLRUEvictor()
     else:
