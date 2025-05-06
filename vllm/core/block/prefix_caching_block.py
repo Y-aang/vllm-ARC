@@ -193,7 +193,8 @@ class PrefixCachingBlockAllocator(BlockAllocator):
         self._block_pool.free_block(block)
 
         # No cached block => Allocate a new block
-        block = self.allocate_mutable_block(prev_block, extra_hash=extra_hash)
+        block = self.allocate_mutable_block(prev_block, extra_hash=extra_hash, 
+                                        content_hash=block.content_hash)
         block.append_token_ids(token_ids)
         return block
 
@@ -215,7 +216,8 @@ class PrefixCachingBlockAllocator(BlockAllocator):
     def allocate_mutable_block(self,
                                prev_block: Optional[Block],
                                extra_hash: Optional[int] = None,
-                               device: Optional[Device] = None) -> Block:
+                               device: Optional[Device] = None,
+                               content_hash: int = None) -> Block:
         """Allocates a mutable block. If there are no free blocks, this will
         evict unused cached blocks.
 
@@ -229,7 +231,7 @@ class PrefixCachingBlockAllocator(BlockAllocator):
         assert device is None
         assert_prefix_caching_block_or_none(prev_block)
 
-        block_id = self._allocate_block_id()
+        block_id = self._allocate_block_id(content_hash=content_hash)
         block = self._block_pool.init_block(prev_block=prev_block,
                                             token_ids=[],
                                             block_size=self._block_size,
@@ -296,7 +298,7 @@ class PrefixCachingBlockAllocator(BlockAllocator):
         # itself (will be handled by the caller)
         self._hashless_allocator.free(block, keep_block_object=True)
 
-    def _allocate_block_id(self) -> BlockId:
+    def _allocate_block_id(self, content_hash: int = None) -> BlockId:
         """First tries to allocate a block id from the hashless allocator,
         and if there are no blocks, then tries to evict an unused cached block.
         """
@@ -304,7 +306,7 @@ class PrefixCachingBlockAllocator(BlockAllocator):
         if hashless_block_id is not None:
             return hashless_block_id
 
-        evicted_block_id = self._maybe_allocate_evicted_block_id()
+        evicted_block_id = self._maybe_allocate_evicted_block_id(content_hash=content_hash)
         if evicted_block_id is not None:
             return evicted_block_id
 
@@ -324,7 +326,7 @@ class PrefixCachingBlockAllocator(BlockAllocator):
         except BlockAllocator.NoFreeBlocksError:
             return None
 
-    def _maybe_allocate_evicted_block_id(self) -> Optional[BlockId]:
+    def _maybe_allocate_evicted_block_id(self, content_hash: int = None) -> Optional[BlockId]:
         if self.evictor.num_blocks == 0:
             return None
 
@@ -332,7 +334,7 @@ class PrefixCachingBlockAllocator(BlockAllocator):
         # into evictor if its ref counter is 0
         # and since its content would be changed, we need
         # to remove it from _cached_blocks's tracking list
-        block_id, content_hash_to_evict = self.evictor.evict()
+        block_id, content_hash_to_evict = self.evictor.evict(content_hash=content_hash)
 
         # Sanity checks
         assert content_hash_to_evict in self._cached_blocks

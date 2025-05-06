@@ -103,7 +103,7 @@ class CustomizedDBLEvictor(Evictor):
     def __contains__(self, block_id: int) -> bool:
         return block_id in self.A1in_free_table or block_id in self.Am_free_table
 
-    def evict(self) -> Tuple[int, int]:
+    def evict(self, content_hash: int = None) -> Tuple[int, int]:
         # Always evict from A1in if available, else from Am
         if len(self.A1in_free_table) > self.k:
             return self._evict_from_A1in()

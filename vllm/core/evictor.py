@@ -90,7 +90,7 @@ class LRUEvictor(Evictor):
     def __contains__(self, block_id: int) -> bool:
         return block_id in self.free_table
 
-    def evict(self) -> Tuple[int, int]:
+    def evict(self, content_hash: int = None) -> Tuple[int, int]:
         if len(self.free_table) == 0:
             raise ValueError("No usable cache memory left")
 
