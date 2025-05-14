@@ -498,16 +498,17 @@ class CustomizedARCEvictor_New(Evictor):
                 else:
                     assert self.T1_table
                     evicted_block_id, evicted_content_hash = self._evict_from_T1()
-            # elif L1_size < self.max_size:
-            else:   # TODO: end case in starting T1[1000] + 66 miss (33 untouched)
+            elif L1_size < self.max_size:
                 total_size = len(self.T1_table) + len(self.T2_table) + len(self.T1_active) + len(self.T2_active) + len(self.B1) + len(self.B2)
                 # assert total_size >= self.max_size  # Can't assert it when last time to fill the cache [miss uncalled| miss called], uncalled part is missing in total_size
                 if total_size >= self.max_size:
                     if total_size == 2 * self.max_size and self.B2:
                         self.B2.popleft()
                 evicted_block_id, evicted_content_hash = self._replace(content_hash)    # Different, must call _replace rather than conditional
-            # else:
-            #     assert False
+            else:
+                # This case happen only when cache is not full
+                assert len(self.T1_table) + len(self.T1_active) + len(self.T2_table) + len(self.T2_active) < self.max_size
+                evicted_block_id, evicted_content_hash = self._replace(content_hash)
 
             self.T1_active.append(evicted_block_id)
             print('evict - evicted_content_hash', evicted_content_hash)
@@ -529,12 +530,15 @@ class CustomizedARCEvictor_New(Evictor):
             self.T2_active.remove(block_id)
             self._add_to_T2(block_id, meta)
         else:
-            if block_id in self.B1 or block_id in self.B2:
-                self._add_to_T2(block_id, meta)
-            else:
-                self._add_to_T1(block_id, meta)
+            assert len(self.T1_table) + len(self.T1_active) + len(self.T2_table) + len(self.T2_active) < self.max_size
+            assert block_id not in self.B1 and block_id not in self.B2
+            self._add_to_T1(block_id, meta)
+            self._prune_ghosts()
+            # if block_id in self.B1 or block_id in self.B2:
+            #     self._add_to_T2(block_id, meta)
+            # else:
+            #     self._add_to_T1(block_id, meta)
         
-        self._prune_ghosts()
         
     def update(self, block_id: int, last_accessed: float):
         assert False
@@ -610,13 +614,11 @@ class CustomizedARCEvictor_New(Evictor):
         self._cleanup_if_necessary(self.T2_queue, self.T2_table)
     
     def _prune_ghosts(self):
-        """确保 ghost 列表 B1_ghost 和 B2_ghost 的大小不超过 max_size"""
-        assert len(self.B1) <= self.max_size and len(self.B2) <= self.max_size
-        while len(self.B1) > self.max_size:
-            assert False
+        # make sure the size of L1(T1 + B1) and L2 don't exceed max_size
+        # assert len(self.B1) <= self.max_size and len(self.B2) <= self.max_size
+        while len(self.T1_table) + len(self.T1_active) + len(self.B1) > self.max_size:
             self.B1.popleft()
-        while len(self.B2) > self.max_size:
-            assert False
+        while len(self.T2_table) + len(self.T2_active) + len(self.B2) > self.max_size:
             self.B2.popleft()
 
 
