@@ -4,6 +4,7 @@ from vllm.core.evictor import BlockMetaData
 from vllm.core.evictor import Evictor
 from collections import OrderedDict, deque
 from typing import Dict, List, Tuple
+import time     # For Debug
 
 class Customized2QEvictor(Evictor):
 
@@ -468,28 +469,36 @@ class CustomizedARCEvictor_New(Evictor):
         return (block_id in self.T1_table) or (block_id in self.T2_table)
 
     def evict(self, content_hash: int = None) -> Tuple[int, int]:
+        # start_time = time.time()
+        
         assert content_hash not in self.T1_table and content_hash not in self.T2_table
         # Choose the Evicted Candidate
         evicted_block_id: int = -1
         evicted_content_hash: int = -1
         if content_hash in self.B1:
-            print('evict - B1 hit', content_hash)
+            # print('evict - B1 hit', content_hash)
             delta = max(1, len(self.B2) // max(1, len(self.B1)))
             self.p = min(self.p + delta, self.max_size)
             evicted_block_id, evicted_content_hash = self._replace(content_hash)
             self.B1.remove(content_hash)
             self.T2_active.append(evicted_block_id)
+            # elapsed_time = time.time() - start_time
+            # print(f"Evict Function Time: {elapsed_time:.6f} seconds")
+            
             return evicted_block_id, evicted_content_hash
         elif content_hash in self.B2:
-            print('evict - B2 hit', content_hash)
+            # print('evict - B2 hit', content_hash)
             delta = max(1, len(self.B1) // max(1, len(self.B2)))
             self.p = max(self.p - delta, 0)
             evicted_block_id, evicted_content_hash = self._replace(content_hash)
             self.B2.remove(content_hash)
             self.T2_active.append(evicted_block_id)
+            # elapsed_time = time.time() - start_time
+            # print(f"Evict Function Time: {elapsed_time:.6f} seconds")
+            
             return evicted_block_id, evicted_content_hash
         else:
-            print(f'evict miss - len T1(A), T2(A), B1, B2 | {len(self.T1_table)} ({len(self.T1_active)}) {len(self.T2_table)} ({len(self.T2_active)})  | {len(self.B1)}  {len(self.B2)}   | p: {self.p} content_hash: {content_hash}')
+            # print(f'evict miss - len T1(A), T2(A), B1, B2 | {len(self.T1_table)} ({len(self.T1_active)}) {len(self.T2_table)} ({len(self.T2_active)})  | {len(self.B1)}  {len(self.B2)}   | p: {self.p} content_hash: {content_hash}')
             L1_size = len(self.T1_table) + len(self.T1_active) + len(self.B1)
             if L1_size == self.max_size:
                 if len(self.T1_table) + len(self.T1_active) < self.max_size:
@@ -507,19 +516,23 @@ class CustomizedARCEvictor_New(Evictor):
                 evicted_block_id, evicted_content_hash = self._replace(content_hash)    # Different, must call _replace rather than conditional
             else:
                 # This case happen only when cache is not full
+                assert False
                 assert len(self.T1_table) + len(self.T1_active) + len(self.T2_table) + len(self.T2_active) < self.max_size
                 evicted_block_id, evicted_content_hash = self._replace(content_hash)
 
             self.T1_active.append(evicted_block_id)
-            print('evict - evicted_content_hash', evicted_content_hash)
+            # print('evict - evicted_content_hash', evicted_content_hash)
+            # elapsed_time = time.time() - start_time
+            # print(f"Evict Function Time: {elapsed_time:.6f} seconds")
+            
             return evicted_block_id, evicted_content_hash
         
         
 
     def add(self, block_id: int, content_hash: int, num_hashed_tokens: int, last_accessed: float):
-        print(f'add - len T1, T2, B1, B2 | {len(self.T1_table)} ({len(self.T1_active)}) {len(self.T2_table)} ({len(self.T2_active)})  | {len(self.B1)} {len(self.B2)}  | p: {self.p} content_hash: {content_hash}')
-        if len(self.T1_active) < 6 and len(self.T1_active) > 0:
-            print("add - T1_active", self.T1_active)
+        # print(f'add - len T1, T2, B1, B2 | {len(self.T1_table)} ({len(self.T1_active)}) {len(self.T2_table)} ({len(self.T2_active)})  | {len(self.B1)} {len(self.B2)}  | p: {self.p} content_hash: {content_hash}')
+        # if len(self.T1_active) < 6 and len(self.T1_active) > 0:
+            # print("add - T1_active", self.T1_active)
         # assert block_id not in self.T1_free_table and block_id not in self.T2_free_table
         meta = BlockMetaData(content_hash, num_hashed_tokens, last_accessed)
     
@@ -552,11 +565,11 @@ class CustomizedARCEvictor_New(Evictor):
 
     def remove(self, block_id: int):
         if block_id in self.T1_table:
-            print('remove - hit T1')
+            # print('remove - hit T1')
             self.T1_table.pop(block_id)
             self.T2_active.append(block_id)
         elif block_id in self.T2_table:
-            print('remove - hit T2')
+            # print('remove - hit T2')
             self.T2_table.pop(block_id)
             self.T2_active.append(block_id)
         else:
@@ -586,20 +599,26 @@ class CustomizedARCEvictor_New(Evictor):
         raise ValueError("No usable block to replace from T1 or T2")
 
     def _evict_from_T1(self) -> Tuple[int, int]:
+        # start_time = time.time()
         while self.T1_queue:
             last_accessed, neg_tokens, block_id, content_hash = heapq.heappop(self.T1_queue)
             if (block_id in self.T1_table and
                     self.T1_table[block_id].last_accessed == last_accessed):
                 self.T1_table.pop(block_id)
+                
+                # print(f"_evict_from_T1 Time: {time.time() - start_time:.6f} seconds")
                 return block_id, content_hash
         raise ValueError("No usable block left in T1 to evict")
 
     def _evict_from_T2(self) -> Tuple[int, int]:
+        # start_time = time.time()
         while self.T2_queue:
             last_accessed, neg_tokens, block_id, content_hash = heapq.heappop(self.T2_queue)
             if (block_id in self.T2_table and
                     self.T2_table[block_id].last_accessed == last_accessed):
                 self.T2_table.pop(block_id)
+                
+                # print(f"_evict_from_T1 Time: {time.time() - start_time:.6f} seconds")
                 return block_id, content_hash
         raise ValueError("No usable block left in T2 to evict")
     

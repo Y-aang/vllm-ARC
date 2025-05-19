@@ -4,6 +4,7 @@ import enum
 import heapq
 from abc import ABC, abstractmethod
 from typing import Dict, List, Tuple
+import time     # For Debug
 
 class EvictionPolicy(enum.Enum):
     """Enum for eviction policy used by make_evictor to instantiate the correct
@@ -91,6 +92,7 @@ class LRUEvictor(Evictor):
         return block_id in self.free_table
 
     def evict(self, content_hash: int = None) -> Tuple[int, int]:
+        # start_time = time.time()
         if len(self.free_table) == 0:
             raise ValueError("No usable cache memory left")
 
@@ -105,8 +107,9 @@ class LRUEvictor(Evictor):
             if (block_id in self.free_table and
                     self.free_table[block_id].last_accessed == last_accessed):
                 self.free_table.pop(block_id)
+                # elapsed_time = time.time() - start_time
+                # print(f"Evict Function Time: {elapsed_time:.6f} seconds")
                 return block_id, content_hash
-
         raise ValueError("No usable cache memory left")
 
     def add(self, block_id: int, content_hash: int, num_hashed_tokens: int,
@@ -235,9 +238,9 @@ def make_evictor(eviction_policy: EvictionPolicy, num_blocks: int) -> Evictor:
     elif eviction_policy == EvictionPolicy.CUSTOMIZED:
         from vllm.core.customized_evictor import Customized2QEvictor, CustomizedLRUEvictor, CustomizedDBLEvictor, CustomizedARCEvictor, CustomizedARCEvictor_New
         # return Customized2QEvictor(num_blocks, int(num_blocks * 1.0))
-        # return CustomizedDBLEvictor(max_size=num_blocks, k=int(num_blocks * 0.5))
+        return CustomizedDBLEvictor(max_size=num_blocks, k=int(num_blocks * 0.5))
         # return CustomizedARCEvictor(max_size=num_blocks)
-        return CustomizedARCEvictor_New(max_size=num_blocks)
+        # return CustomizedARCEvictor_New(max_size=num_blocks)
         # return LRUEvictor()
         # return CustomizedLRUEvictor()
     else:
