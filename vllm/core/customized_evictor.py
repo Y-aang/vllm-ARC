@@ -460,16 +460,16 @@ class CustomizedARCEvictor_New(Evictor):
         # 幽灵区
         self.B1: deque[int] = deque()     # Record content_hash
         self.B2: deque[int] = deque()
-
-        self.T1_active: deque[int] = deque()    # Record block_id
-        self.T2_active: deque[int] = deque()
+        
+        self.T1_active: set[int] = set()    # Record block_id
+        self.T2_active: set[int] = set()
 
 
     def __contains__(self, block_id: int) -> bool:
         return (block_id in self.T1_table) or (block_id in self.T2_table)
 
     def evict(self, content_hash: int = None) -> Tuple[int, int]:
-        # start_time = time.time()
+        start_time = time.time()
         
         assert content_hash not in self.T1_table and content_hash not in self.T2_table
         # Choose the Evicted Candidate
@@ -481,9 +481,9 @@ class CustomizedARCEvictor_New(Evictor):
             self.p = min(self.p + delta, self.max_size)
             evicted_block_id, evicted_content_hash = self._replace(content_hash)
             self.B1.remove(content_hash)
-            self.T2_active.append(evicted_block_id)
-            # elapsed_time = time.time() - start_time
-            # print(f"Evict Function Time: {elapsed_time:.6f} seconds")
+            self.T2_active.add(evicted_block_id)
+            elapsed_time = time.time() - start_time
+            print(f"Evict Function Time: {elapsed_time:.6f} seconds")
             
             return evicted_block_id, evicted_content_hash
         elif content_hash in self.B2:
@@ -492,9 +492,9 @@ class CustomizedARCEvictor_New(Evictor):
             self.p = max(self.p - delta, 0)
             evicted_block_id, evicted_content_hash = self._replace(content_hash)
             self.B2.remove(content_hash)
-            self.T2_active.append(evicted_block_id)
-            # elapsed_time = time.time() - start_time
-            # print(f"Evict Function Time: {elapsed_time:.6f} seconds")
+            self.T2_active.add(evicted_block_id)
+            elapsed_time = time.time() - start_time
+            print(f"Evict Function Time: {elapsed_time:.6f} seconds")
             
             return evicted_block_id, evicted_content_hash
         else:
@@ -520,10 +520,10 @@ class CustomizedARCEvictor_New(Evictor):
                 assert len(self.T1_table) + len(self.T1_active) + len(self.T2_table) + len(self.T2_active) < self.max_size
                 evicted_block_id, evicted_content_hash = self._replace(content_hash)
 
-            self.T1_active.append(evicted_block_id)
+            self.T1_active.add(evicted_block_id)
             # print('evict - evicted_content_hash', evicted_content_hash)
-            # elapsed_time = time.time() - start_time
-            # print(f"Evict Function Time: {elapsed_time:.6f} seconds")
+            elapsed_time = time.time() - start_time
+            print(f"Evict Function Time: {elapsed_time:.6f} seconds")
             
             return evicted_block_id, evicted_content_hash
         
@@ -567,11 +567,11 @@ class CustomizedARCEvictor_New(Evictor):
         if block_id in self.T1_table:
             # print('remove - hit T1')
             self.T1_table.pop(block_id)
-            self.T2_active.append(block_id)
+            self.T2_active.add(block_id)
         elif block_id in self.T2_table:
             # print('remove - hit T2')
             self.T2_table.pop(block_id)
-            self.T2_active.append(block_id)
+            self.T2_active.add(block_id)
         else:
             raise ValueError(f"Attempting to remove non-tracked block {block_id}")
 
@@ -599,26 +599,26 @@ class CustomizedARCEvictor_New(Evictor):
         raise ValueError("No usable block to replace from T1 or T2")
 
     def _evict_from_T1(self) -> Tuple[int, int]:
-        # start_time = time.time()
+        start_time = time.time()
         while self.T1_queue:
             last_accessed, neg_tokens, block_id, content_hash = heapq.heappop(self.T1_queue)
             if (block_id in self.T1_table and
                     self.T1_table[block_id].last_accessed == last_accessed):
                 self.T1_table.pop(block_id)
                 
-                # print(f"_evict_from_T1 Time: {time.time() - start_time:.6f} seconds")
+                print(f"_evict_from_T1 Time: {time.time() - start_time:.6f} seconds")
                 return block_id, content_hash
         raise ValueError("No usable block left in T1 to evict")
 
     def _evict_from_T2(self) -> Tuple[int, int]:
-        # start_time = time.time()
+        start_time = time.time()
         while self.T2_queue:
             last_accessed, neg_tokens, block_id, content_hash = heapq.heappop(self.T2_queue)
             if (block_id in self.T2_table and
                     self.T2_table[block_id].last_accessed == last_accessed):
                 self.T2_table.pop(block_id)
                 
-                # print(f"_evict_from_T1 Time: {time.time() - start_time:.6f} seconds")
+                print(f"_evict_from_T1 Time: {time.time() - start_time:.6f} seconds")
                 return block_id, content_hash
         raise ValueError("No usable block left in T2 to evict")
     
