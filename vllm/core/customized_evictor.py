@@ -458,8 +458,8 @@ class CustomizedARCEvictor_New(Evictor):
         self.T2_queue: List[Tuple[float,int,int,int]] = []
 
         # 幽灵区
-        self.B1: deque[int] = deque()     # Record content_hash
-        self.B2: deque[int] = deque()
+        self.B1: OrderedDict[int, None] = OrderedDict()     # Record content_hash
+        self.B2: OrderedDict[int, None] = OrderedDict()
         
         self.T1_active: set[int] = set()    # Record block_id
         self.T2_active: set[int] = set()
@@ -480,7 +480,7 @@ class CustomizedARCEvictor_New(Evictor):
             delta = max(1, len(self.B2) // max(1, len(self.B1)))
             self.p = min(self.p + delta, self.max_size)
             evicted_block_id, evicted_content_hash = self._replace(content_hash)
-            self.B1.remove(content_hash)
+            del self.B1[content_hash]
             self.T2_active.add(evicted_block_id)
             elapsed_time = time.time() - start_time
             print(f"Evict Function Time: {elapsed_time:.6f} seconds")
@@ -491,7 +491,7 @@ class CustomizedARCEvictor_New(Evictor):
             delta = max(1, len(self.B1) // max(1, len(self.B2)))
             self.p = max(self.p - delta, 0)
             evicted_block_id, evicted_content_hash = self._replace(content_hash)
-            self.B2.remove(content_hash)
+            del self.B2[content_hash]
             self.T2_active.add(evicted_block_id)
             elapsed_time = time.time() - start_time
             print(f"Evict Function Time: {elapsed_time:.6f} seconds")
@@ -502,7 +502,7 @@ class CustomizedARCEvictor_New(Evictor):
             L1_size = len(self.T1_table) + len(self.T1_active) + len(self.B1)
             if L1_size == self.max_size:
                 if len(self.T1_table) + len(self.T1_active) < self.max_size:
-                    self.B1.popleft()
+                    self.B1.popitem(last=False)
                     evicted_block_id, evicted_content_hash = self._replace(content_hash)
                 else:
                     assert self.T1_table
@@ -512,7 +512,7 @@ class CustomizedARCEvictor_New(Evictor):
                 # assert total_size >= self.max_size  # Can't assert it when last time to fill the cache [miss uncalled| miss called], uncalled part is missing in total_size
                 if total_size >= self.max_size:
                     if total_size == 2 * self.max_size and self.B2:
-                        self.B2.popleft()
+                        self.B2.popitem(last=False)
                 evicted_block_id, evicted_content_hash = self._replace(content_hash)    # Different, must call _replace rather than conditional
             else:
                 # This case happen only when cache is not full
@@ -586,15 +586,15 @@ class CustomizedARCEvictor_New(Evictor):
             (content_hash_replace_for in self.B2 and Len_cached_T1 == self.p)
         ):
             block_id, content_hash = self._evict_from_T1()
-            self.B1.append(content_hash)
+            self.B1[content_hash] = None
             return block_id, content_hash
         elif self.T2_table:
             block_id, content_hash = self._evict_from_T2()
-            self.B2.append(content_hash)
+            self.B2[content_hash] = None
             return block_id, content_hash
         elif self.T1_table:     # edge case: only T1 (p=c), [hit, miss], T2 only has active items
             block_id, content_hash = self._evict_from_T1()
-            self.B1.append(content_hash)
+            self.B1[content_hash] = None
             return block_id, content_hash
         raise ValueError("No usable block to replace from T1 or T2")
 
@@ -636,9 +636,9 @@ class CustomizedARCEvictor_New(Evictor):
         # make sure the size of L1(T1 + B1) and L2 don't exceed max_size
         # assert len(self.B1) <= self.max_size and len(self.B2) <= self.max_size
         while len(self.T1_table) + len(self.T1_active) + len(self.B1) > self.max_size:
-            self.B1.popleft()
+            self.B1.popitem(last=False)
         while len(self.T2_table) + len(self.T2_active) + len(self.B2) > self.max_size:
-            self.B2.popleft()
+            self.B2.popitem(last=False)
 
 
     def _cleanup_if_necessary(self, queue: List[Tuple[float, int, int, int]], table: Dict[int, BlockMetaData]):
