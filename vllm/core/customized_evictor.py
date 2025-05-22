@@ -219,245 +219,24 @@ class CustomizedDBLEvictor(Evictor):
             self.A1in_priority_queue = new_queue
         else:
             self.Am_priority_queue = new_queue
-
+            
 
 class CustomizedARCEvictor(Evictor):
     CLEANUP_THRESHOLD = 50  # Threshold to trigger heap cleanup
 
     def __init__(self, max_size: int = 134):
         self.max_size = max_size
-        self.p = 0  # ARC 中对 T1 的目标大小
+        self.p = 0  # ARC's adjustment coefficient
 
-        # 活跃区 free tables
-        self.T1_free_table: Dict[int, BlockMetaData] = {}
-        self.T2_free_table: Dict[int, BlockMetaData] = {}
-
-        # 对应的优先队列 (last_accessed, -tokens, block_id, content_hash)
-        self.T1_priority_queue: List[Tuple[float,int,int,int]] = []
-        self.T2_priority_queue: List[Tuple[float,int,int,int]] = []
-
-        # 幽灵区
-        self.B1_ghost: deque[int] = deque()     # Record content_hash
-        self.B2_ghost: deque[int] = deque()
-
-        # 记录外部 remove 的 block id，用于下次 add 时直接晋升
-        self.removed_T1: deque[int] = deque()   # Record block_id
-        self.removed_T2: deque[int] = deque()
-        
-        self.removed_B1: deque[int] = deque()   # Record content_hash
-        self.removed_B2: deque[int] = deque()
-        
-        self.evicted_T1: deque[int] = deque()   # Record block_id
-        self.evicted_T2: deque[int] = deque()
-
-
-    def __contains__(self, block_id: int) -> bool:
-        return (block_id in self.T1_free_table) or (block_id in self.T2_free_table)
-
-    def evict(self, content_hash: int = None) -> Tuple[int, int]:
-        assert content_hash not in self.T1_free_table and content_hash not in self.T2_free_table
-        # modify p
-        if content_hash in self.B1_ghost:
-            delta = max(1, len(self.B2_ghost) // max(1, len(self.B1_ghost)))
-            self.p = min(self.p + delta, self.max_size)
-        elif content_hash in self.B2_ghost:
-            delta = max(1, len(self.B1_ghost) // max(1, len(self.B2_ghost)))
-            self.p = max(self.p - delta, 0)
-        
-        # Choose the Evicted Candidate
-        evicted_block_id: int = -1
-        evicted_content_hash: int = -1
-        L1_size = len(self.T1_free_table) + len(self.removed_T1) + len(self.evicted_T1) + len(self.B1_ghost)
-        if content_hash not in self.B1_ghost and content_hash not in self.B2_ghost and len(self.B1_ghost) == 0 and L1_size >= self.max_size:
-        # if content_hash not in self.B1_ghost and content_hash not in self.B2_ghost and len(self.T2_free_table) == 0:
-            evicted_block_id, evicted_content_hash = self._evict_from_T1()
-        else:
-            evicted_block_id, evicted_content_hash = self._replace(content_hash)
-
-        if content_hash in self.B1_ghost:
-            print('B1 hit', content_hash)
-            self.B1_ghost.remove(content_hash)
-            self.removed_B1.append(content_hash)
-        elif content_hash in self.B2_ghost:
-            print('B2 hit', content_hash)
-            self.B2_ghost.remove(content_hash)
-            self.removed_B2.append(content_hash)
-        else:
-            L1_size = len(self.T1_free_table) + len(self.evicted_T1) + len(self.B1_ghost)
-            L2_size = len(self.T2_free_table) + len(self.removed_T1) + len(self.removed_T2) + len(self.evicted_T2) + len(self.B2_ghost) + len(self.removed_B1) + len(self.removed_B2)
-            print(f'evict - len T1(R, E), T2(R, E), B1(R), B2(R) | {len(self.T1_free_table)} ({len(self.removed_T1)} {len(self.evicted_T1)}) {len(self.T2_free_table)} ({len(self.removed_T2)} {len(self.evicted_T2)})  | {len(self.B1_ghost)} ({len(self.removed_B1)}) {len(self.B2_ghost)} ({len(self.removed_B2)})  | p: {self.p} content_hash: {content_hash} L1_size {L1_size}')
-            # print('B miss, L1_size T1_total B1:', L1_size, len(self.T1_free_table) + len(self.removed_T1), len(self.B1_ghost))
-            total_size = L1_size + L2_size
-            # if L1_size >= self.max_size and len(self.T1_free_table) + len(self.removed_T1) < self.max_size and not self.B1_ghost:
-            if L1_size >= self.max_size and self.B1_ghost:
-                while L1_size >= self.max_size and self.B1_ghost:
-                    poped_content_hash = self.B1_ghost.popleft()
-                    print('B miss, popleft(), hash:', poped_content_hash)
-                    L1_size -= 1
-            elif L1_size < self.max_size and total_size > self.max_size:
-                if total_size >= 2 * self.max_size and self.B2_ghost:
-                    self.B2_ghost.popleft()
-        
-        return evicted_block_id, evicted_content_hash
-        
-
-    def add(self, block_id: int, content_hash: int, num_hashed_tokens: int, last_accessed: float):
-        print(f'add - len T1, T2, B1, B2 | {len(self.T1_free_table)} ({len(self.removed_T1)}) {len(self.T2_free_table)} ({len(self.removed_T2)})  | {len(self.B1_ghost)} ({len(self.removed_B1)}) {len(self.B2_ghost)} ({len(self.removed_B2)})  | p: {self.p} content_hash: {content_hash}')
-        # assert block_id not in self.T1_free_table and block_id not in self.T2_free_table
-        meta = BlockMetaData(content_hash, num_hashed_tokens, last_accessed)
-        
-        if block_id in self.evicted_T1:
-            self.evicted_T1.remove(block_id)
-        if block_id in self.evicted_T2:
-            self.evicted_T2.remove(block_id)
-        
-        # Removed block: promote to T2
-        if block_id in self.removed_T1 or block_id in self.removed_T2:
-            if block_id in self.removed_T1:
-                self.removed_T1.remove(block_id)
-            if block_id in self.removed_T2:
-                self.removed_T2.remove(block_id)
-            self.T2_free_table[block_id] = meta
-            heapq.heappush(
-                self.T2_priority_queue,
-                (last_accessed, -num_hashed_tokens, block_id, content_hash)
-            )
-            self._cleanup_if_necessary(self.T2_priority_queue, self.T2_free_table)
-            return
-
-        # assert content_hash not in self.B1_ghost and content_hash not in self.B2_ghost
-        # Ghost hit in B1: promote to T2 and increase p
-        if content_hash in self.removed_B1:
-            self.removed_B1.remove(content_hash)
-            self.T2_free_table[block_id] = meta
-            heapq.heappush(self.T2_priority_queue, (last_accessed, -num_hashed_tokens, block_id, content_hash))
-            self._cleanup_if_necessary(self.T2_priority_queue, self.T2_free_table)
-            return
-        
-        # Ghost hit in B2: promote to T2 and decrease p
-        if content_hash in self.removed_B2:
-            self.removed_B2.remove(content_hash)
-            self.T2_free_table[block_id] = meta
-            heapq.heappush(self.T2_priority_queue, (last_accessed, -num_hashed_tokens, block_id, content_hash))
-            self._cleanup_if_necessary(self.T2_priority_queue, self.T2_free_table)
-            return
-        
-        # New block: insert into T1
-        self.T1_free_table[block_id] = meta
-        heapq.heappush(self.T1_priority_queue, (last_accessed, -num_hashed_tokens, block_id, content_hash))
-        self._cleanup_if_necessary(self.T1_priority_queue, self.T1_free_table)
-        self._prune_ghosts()
-
-    def update(self, block_id: int, last_accessed: float):
-        assert False
-        # Update last_accessed for an already-tracked block
-        if block_id in self.T1_free_table:
-            self.T1_free_table[block_id].last_accessed = last_accessed
-        elif block_id in self.T2_free_table:
-            self.T2_free_table[block_id].last_accessed = last_accessed
-        else:
-            raise ValueError(f"Attempting to update non-tracked block {block_id}")
-
-    def remove(self, block_id: int):
-        if block_id in self.T1_free_table:
-            print('remove - hit T1')
-            content_hash = self.T1_free_table[block_id].content_hash
-            # assert content_hash not in self.B1_ghost
-            
-            self.T1_free_table.pop(block_id)
-            self.removed_T1.append(block_id)
-        elif block_id in self.T2_free_table:
-            print('remove - hit T2')
-            content_hash = self.T2_free_table[block_id].content_hash
-            # assert content_hash not in self.B2_ghost
-            
-            self.T2_free_table.pop(block_id)
-            self.removed_T2.append(block_id)
-        else:
-            raise ValueError(f"Attempting to remove non-tracked block {block_id}")
-
-    @property
-    def num_blocks(self) -> int:
-        return len(self.T1_free_table) + len(self.T2_free_table)
-    
-    def _replace(self, content_hash_replace_for: int):
-        Len_cached_T1 = len(self.T1_free_table) + len(self.evicted_T1)
-        if self.T1_free_table and (
-            (content_hash_replace_for in self.B2_ghost and Len_cached_T1 >= self.p) or
-            (Len_cached_T1 > self.p)
-        ):
-            block_id, content_hash = self._evict_from_T1()
-            self.B1_ghost.append(content_hash)
-            return block_id, content_hash
-        elif self.T2_free_table:
-            block_id, content_hash = self._evict_from_T2()
-            self.B2_ghost.append(content_hash)
-            return block_id, content_hash
-        raise ValueError("No usable block to replace from T1 or T2")
-
-    def _evict_from_T1(self) -> Tuple[int, int]:
-        while self.T1_priority_queue:
-            last_accessed, neg_tokens, block_id, content_hash = heapq.heappop(self.T1_priority_queue)
-            if (block_id in self.T1_free_table and
-                    self.T1_free_table[block_id].last_accessed == last_accessed):
-                self.T1_free_table.pop(block_id)
-                self.evicted_T1.append(block_id)
-                return block_id, content_hash
-        raise ValueError("No usable block left in T1 to evict")
-
-    def _evict_from_T2(self) -> Tuple[int, int]:
-        while self.T2_priority_queue:
-            last_accessed, neg_tokens, block_id, content_hash = heapq.heappop(self.T2_priority_queue)
-            if (block_id in self.T2_free_table and
-                    self.T2_free_table[block_id].last_accessed == last_accessed):
-                self.T2_free_table.pop(block_id)
-                self.evicted_T2.append(block_id)
-                return block_id, content_hash
-        raise ValueError("No usable block left in T2 to evict")
-    
-    def _prune_ghosts(self):
-        """确保 ghost 列表 B1_ghost 和 B2_ghost 的大小不超过 max_size"""
-        assert len(self.removed_B1) <= self.max_size and len(self.removed_B2) <= self.max_size
-        while len(self.B1_ghost) + len(self.removed_B1) > self.max_size:
-            assert False
-            self.B1_ghost.popleft()
-        while len(self.B2_ghost) + len(self.removed_B2) > self.max_size:
-            assert False
-            self.B2_ghost.popleft()
-
-
-    def _cleanup_if_necessary(self, queue: List[Tuple[float, int, int, int]], table: Dict[int, BlockMetaData]):
-        if len(queue) > self.CLEANUP_THRESHOLD * len(table):
-            self._cleanup(queue, table)
-
-    def _cleanup(self, queue: List[Tuple[float, int, int, int]], table: Dict[int, BlockMetaData]):
-        new_queue = []
-        for block_id, meta in table.items():
-            new_queue.append((meta.last_accessed, -meta.num_hashed_tokens, block_id, meta.content_hash))
-        heapq.heapify(new_queue)
-
-        if queue is self.T1_priority_queue:
-            self.T1_priority_queue = new_queue
-        else:
-            self.T2_priority_queue = new_queue
-            
-
-class CustomizedARCEvictor_New(Evictor):
-    CLEANUP_THRESHOLD = 50  # Threshold to trigger heap cleanup
-
-    def __init__(self, max_size: int = 134):
-        self.max_size = max_size
-        self.p = 0  # ARC 中对 T1 的目标大小
-
-        # 活跃区 free tables
+        # T1 T2 Free Tables
         self.T1_table: Dict[int, BlockMetaData] = {}
         self.T2_table: Dict[int, BlockMetaData] = {}
 
-        # 对应的优先队列 (last_accessed, -tokens, block_id, content_hash)
+        # T1 T2 priority Queue (last_accessed, -tokens, block_id, content_hash)
         self.T1_queue: List[Tuple[float,int,int,int]] = []
         self.T2_queue: List[Tuple[float,int,int,int]] = []
 
-        # 幽灵区
+        # Ghost
         self.B1: OrderedDict[int, None] = OrderedDict()     # Record content_hash
         self.B2: OrderedDict[int, None] = OrderedDict()
         
@@ -469,8 +248,6 @@ class CustomizedARCEvictor_New(Evictor):
         return (block_id in self.T1_table) or (block_id in self.T2_table)
 
     def evict(self, content_hash: int = None) -> Tuple[int, int]:
-        start_time = time.time()
-        
         assert content_hash not in self.T1_table and content_hash not in self.T2_table
         # Choose the Evicted Candidate
         evicted_block_id: int = -1
@@ -482,9 +259,6 @@ class CustomizedARCEvictor_New(Evictor):
             evicted_block_id, evicted_content_hash = self._replace(content_hash)
             del self.B1[content_hash]
             self.T2_active.add(evicted_block_id)
-            elapsed_time = time.time() - start_time
-            print(f"Evict Function Time: {elapsed_time:.6f} seconds")
-            
             return evicted_block_id, evicted_content_hash
         elif content_hash in self.B2:
             # print('evict - B2 hit', content_hash)
@@ -493,9 +267,6 @@ class CustomizedARCEvictor_New(Evictor):
             evicted_block_id, evicted_content_hash = self._replace(content_hash)
             del self.B2[content_hash]
             self.T2_active.add(evicted_block_id)
-            elapsed_time = time.time() - start_time
-            print(f"Evict Function Time: {elapsed_time:.6f} seconds")
-            
             return evicted_block_id, evicted_content_hash
         else:
             # print(f'evict miss - len T1(A), T2(A), B1, B2 | {len(self.T1_table)} ({len(self.T1_active)}) {len(self.T2_table)} ({len(self.T2_active)})  | {len(self.B1)}  {len(self.B2)}   | p: {self.p} content_hash: {content_hash}')
@@ -522,13 +293,9 @@ class CustomizedARCEvictor_New(Evictor):
 
             self.T1_active.add(evicted_block_id)
             # print('evict - evicted_content_hash', evicted_content_hash)
-            elapsed_time = time.time() - start_time
-            print(f"Evict Function Time: {elapsed_time:.6f} seconds")
-            
             return evicted_block_id, evicted_content_hash
         
         
-
     def add(self, block_id: int, content_hash: int, num_hashed_tokens: int, last_accessed: float):
         # print(f'add - len T1, T2, B1, B2 | {len(self.T1_table)} ({len(self.T1_active)}) {len(self.T2_table)} ({len(self.T2_active)})  | {len(self.B1)} {len(self.B2)}  | p: {self.p} content_hash: {content_hash}')
         # if len(self.T1_active) < 6 and len(self.T1_active) > 0:
@@ -547,10 +314,6 @@ class CustomizedARCEvictor_New(Evictor):
             assert block_id not in self.B1 and block_id not in self.B2
             self._add_to_T1(block_id, meta)
             self._prune_ghosts()
-            # if block_id in self.B1 or block_id in self.B2:
-            #     self._add_to_T2(block_id, meta)
-            # else:
-            #     self._add_to_T1(block_id, meta)
         
         
     def update(self, block_id: int, last_accessed: float):
@@ -599,26 +362,20 @@ class CustomizedARCEvictor_New(Evictor):
         raise ValueError("No usable block to replace from T1 or T2")
 
     def _evict_from_T1(self) -> Tuple[int, int]:
-        start_time = time.time()
         while self.T1_queue:
             last_accessed, neg_tokens, block_id, content_hash = heapq.heappop(self.T1_queue)
             if (block_id in self.T1_table and
                     self.T1_table[block_id].last_accessed == last_accessed):
                 self.T1_table.pop(block_id)
-                
-                print(f"_evict_from_T1 Time: {time.time() - start_time:.6f} seconds")
                 return block_id, content_hash
         raise ValueError("No usable block left in T1 to evict")
 
     def _evict_from_T2(self) -> Tuple[int, int]:
-        start_time = time.time()
         while self.T2_queue:
             last_accessed, neg_tokens, block_id, content_hash = heapq.heappop(self.T2_queue)
             if (block_id in self.T2_table and
                     self.T2_table[block_id].last_accessed == last_accessed):
                 self.T2_table.pop(block_id)
-                
-                print(f"_evict_from_T1 Time: {time.time() - start_time:.6f} seconds")
                 return block_id, content_hash
         raise ValueError("No usable block left in T2 to evict")
     
