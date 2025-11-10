@@ -2,6 +2,7 @@
 
 import enum
 import heapq
+import os
 from abc import ABC, abstractmethod
 from typing import Dict, List, Tuple
 from collections import OrderedDict
@@ -156,10 +157,25 @@ def make_evictor(eviction_policy: EvictionPolicy, num_blocks: int) -> Evictor:
         return LRUEvictor()
     elif eviction_policy == EvictionPolicy.CUSTOMIZED:
         from vllm.core.customized_evictor import Customized2QEvictor, CustomizedLRUEvictor, CustomizedDBLEvictor, CustomizedARCEvictor
-        return LRUEvictor()
+        # return LRUEvictor()
         # return CustomizedDBLEvictor(max_size=num_blocks, k=int(num_blocks * 0.5))
         # return CustomizedARCEvictor(max_size=num_blocks)
         # return Customized2QEvictor(num_blocks, int(num_blocks * 1.0))     # For Debug Only
         # return CustomizedLRUEvictor()     # For Debug Only
+        
+        evictor_type = os.getenv("VLLM_CUSTOMIZED_EVICTOR_TYPE", "ARC").upper()
+        
+        if evictor_type == "LRU":
+            print("Using LRU evictor")
+            return LRUEvictor()
+        elif evictor_type == "DBL":
+            print("Using DBL evictor")
+            return CustomizedDBLEvictor(max_size=num_blocks, k=int(num_blocks * 0.5))
+        elif evictor_type == "ARC":
+            print("Using ARC evictor")
+            return CustomizedARCEvictor(max_size=num_blocks)
+        else:
+            raise ValueError(f"Unknown customized evictor type: {evictor_type}. "
+                           f"Supported types: LRU, DBL, ARC")
     else:
         raise ValueError(f"Unknown cache eviction policy: {eviction_policy}")
