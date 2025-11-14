@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 """Token blocks."""
+import os
 import sys
 from bisect import bisect_left
 from os.path import commonprefix
@@ -181,8 +182,10 @@ class PrefixCachingBlockAllocator(BlockAllocator):
         assert block.content_hash is not None
         
         # print("block.content_hash:", block.content_hash)
-        with open("/home/shenyang/tests/result/block_log.txt", "a") as f:
-            f.write(str(block.content_hash) + " ")
+        block_log_path = os.environ.get("BLOCK_LOG_FILE_PATH")
+        if block_log_path:
+            with open(block_log_path, "a") as f:
+                f.write(str(block.content_hash) + " ")
         cached_block_id = self._cached_blocks.get(block.content_hash, None)
         if cached_block_id is not None:
             self.metric_data.query(hit=True)
