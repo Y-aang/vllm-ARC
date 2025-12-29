@@ -418,38 +418,64 @@ class CustomizedARCEvictor(Evictor):
 
 class CustomizedLRUEvictor(Evictor):
 
+    CLEANUP_THRESHOLD = 50
+
     def __init__(self):
-        self.cache: [int, BlockMetaData] = OrderedDict()
+        self.free_table: Dict[int, BlockMetaData] = {}
+        self.priority_queue = []
 
     def __contains__(self, block_id: int) -> bool:
-        return block_id in self.cache
+        return block_id in self.free_table
 
-    def evict(self) -> Tuple[int, int]:
-        # print('[EVICT] len(self.A1in, A1out, Am):', len(self.A1in), len(self.A1out), len(self.Am))
-        if self.cache:
-            block_id, meta = self.cache.popitem(last=False)
-            return block_id, meta.content_hash
-        raise RuntimeError("No block available to evict")
-    
+    def evict(self, content_hash: int = None) -> Tuple[int, int]:
+        if len(self.free_table) == 0:
+            raise ValueError("No usable cache memory left")
+
+        while self.priority_queue:
+            last_accessed, _, block_id, content_hash = heapq.heappop(
+                self.priority_queue)
+            if (block_id in self.free_table and
+                    self.free_table[block_id].last_accessed == last_accessed):
+                self.free_table.pop(block_id)
+                return block_id, content_hash
+        raise ValueError("No usable cache memory left")
+
     def add(self, block_id: int, content_hash: int, num_hashed_tokens: int,
             last_accessed: float):
-        # print('[ADD] len(self.A1in, A1out, Am):', len(self.A1in), len(self.A1out), len(self.Am))
-        assert block_id not in self.cache
-        meta = BlockMetaData(content_hash, num_hashed_tokens, last_accessed)
-        self.cache[block_id] = meta
-        self.cache.move_to_end(block_id)
-        
+        self.free_table[block_id] = BlockMetaData(content_hash,
+                                                  num_hashed_tokens,
+                                                  last_accessed)
+        heapq.heappush(
+            self.priority_queue,
+            (last_accessed, -num_hashed_tokens, block_id, content_hash))
+        self._cleanup_if_necessary()
+
     def update(self, block_id: int, last_accessed: float):
         assert False
-        if block_id in self.cache:
-            self.cache[block_id].last_accessed = last_accessed
+        self.free_table[block_id].last_accessed = last_accessed
+
+    def _cleanup_if_necessary(self):
+        if len(self.priority_queue) > CustomizedLRUEvictor.CLEANUP_THRESHOLD * len(
+                self.free_table):
+            self._cleanup()
+
+    def _cleanup(self):
+        new_priority_queue: List[Tuple[float, int, int, int]] = []
+
+        for block_id, block in self.free_table.items():
+            new_priority_queue.append(
+                (block.last_accessed, -block.num_hashed_tokens, block_id,
+                 block.content_hash))
+        heapq.heapify(new_priority_queue)
+
+        self.priority_queue = new_priority_queue
 
     def remove(self, block_id: int):
-        if block_id in self.cache:
-            self.cache.pop(block_id)
-        else:
-            raise ValueError(f"Block {block_id} not tracked")
-        
+        if block_id not in self.free_table:
+            raise ValueError(
+                "Attempting to remove block that's not in the evictor")
+        self.free_table.pop(block_id)
+
     @property
     def num_blocks(self) -> int:
-        return len(self.cache)
+        return len(self.free_table)

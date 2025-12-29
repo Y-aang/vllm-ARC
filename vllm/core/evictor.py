@@ -168,6 +168,9 @@ def make_evictor(eviction_policy: EvictionPolicy, num_blocks: int) -> Evictor:
         if evictor_type == "LRU":
             print("Using LRU evictor")
             return LRUEvictor()
+        elif evictor_type == "LRU_L":
+            print("Using LRU_L evictor")
+            return CustomizedLRUEvictor()
         elif evictor_type == "DBL":
             print("Using DBL evictor")
             return CustomizedDBLEvictor(max_size=num_blocks, k=int(num_blocks * 0.5))
