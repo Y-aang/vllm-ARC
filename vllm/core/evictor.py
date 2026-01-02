@@ -4,7 +4,7 @@ import enum
 import heapq
 import os
 from abc import ABC, abstractmethod
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Optional
 from collections import OrderedDict
 import time     # For Debug
 
@@ -38,7 +38,7 @@ class Evictor(ABC):
 
     @abstractmethod
     def add(self, block_id: int, content_hash: int, num_hashed_tokens: int,
-            last_accessed: float):
+            last_accessed: float, prev_block_content_hash: Optional[int]):
         """Adds block to the evictor, making it a candidate for eviction"""
         pass
 
@@ -67,10 +67,11 @@ class BlockMetaData:
     """
 
     def __init__(self, content_hash: int, num_hashed_tokens: int,
-                 last_accessed: float):
+                 last_accessed: float, prev_block_content_hash: Optional[int] = None):
         self.content_hash = content_hash
         self.num_hashed_tokens = num_hashed_tokens
         self.last_accessed = last_accessed
+        self.prev_block_content_hash = prev_block_content_hash
 
 
 class LRUEvictor(Evictor):
@@ -112,7 +113,7 @@ class LRUEvictor(Evictor):
         raise ValueError("No usable cache memory left")
 
     def add(self, block_id: int, content_hash: int, num_hashed_tokens: int,
-            last_accessed: float):
+            last_accessed: float, prev_block_content_hash: Optional[int] = None):
         self.free_table[block_id] = BlockMetaData(content_hash,
                                                   num_hashed_tokens,
                                                   last_accessed)
@@ -163,7 +164,7 @@ def make_evictor(eviction_policy: EvictionPolicy, num_blocks: int) -> Evictor:
         # return Customized2QEvictor(num_blocks, int(num_blocks * 1.0))     # For Debug Only
         # return CustomizedLRUEvictor()     # For Debug Only
         
-        evictor_type = os.getenv("VLLM_CUSTOMIZED_EVICTOR_TYPE", "ARC").upper()
+        evictor_type = os.getenv("VLLM_CUSTOMIZED_EVICTOR_TYPE", "LRU_L").upper()
         
         if evictor_type == "LRU":
             print("Using LRU evictor")
