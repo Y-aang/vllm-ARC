@@ -279,7 +279,7 @@ class PrefixCachingBlockAllocator(BlockAllocator):
 
         prev_block_content_hash = None
         if block.prev_block is not None:
-            prev_block_content_hash = block.prev_block.content_hash
+            prev_block_content_hash = block.prev_block.content_hash # TODO: add prev block id
 
         # Add the cached block to the evictor
         # (This keeps the cached block around so it can be reused)

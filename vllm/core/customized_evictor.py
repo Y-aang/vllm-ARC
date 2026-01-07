@@ -424,10 +424,9 @@ class CustomizedLRUEvictor(Evictor):
 
     def __init__(self):
         self.free_table: Dict[int, BlockMetaData] = {}      # block_id, actual blocks in evictor
-        self.tail_pq: List[Tuple[float, int, int, int]] = []
-        self.tail_table: Dict[int, Tuple[float, int, int, int]] = {}    # key: content_hash
-        self.next_block: Dict[int, int] = {}    # key: content_hash
         self.active_block: Set[int] = set()     # block_id, free_table + active_block = Full Cache
+        self.tail_table: TailTable = TailTable()    # key: content_hash, ordered by (last_accessed, ...)
+        self.next_block: Dict[int, Set[int]] = {}    # key: content_hash
 
         self.eviction_window_size = 5
 
@@ -441,13 +440,12 @@ class CustomizedLRUEvictor(Evictor):
         evicted_block_id: int = -1
         evicted_content_hash: int = -1
         max_num_hashed_tokens: int = -1
-        eviction_window: Set[Tuple[float, int, int, int]] = set()
-        while len(eviction_window) < self.eviction_window_size and self.tail_pq:
-            last_accessed, num_hashed_tokens, block_id, content_hash = heapq.heappop(
-                self.tail_pq)
+        eviction_window: Dict[int, Tuple[float, int, int, int]] = {}    # key: content_hash
+        while len(eviction_window) < self.eviction_window_size and len(self.tail_table) > 0:
+            last_accessed, num_hashed_tokens, block_id, content_hash = self.tail_table.pop_last()
             if (block_id in self.free_table and     # ensure it's not in active_block
                     self.free_table[block_id].last_accessed == last_accessed):
-                eviction_window.add(self.free_table[block_id])
+                eviction_window[content_hash] = (last_accessed, num_hashed_tokens, block_id, content_hash)
                 if not eviction_window or num_hashed_tokens > max_num_hashed_tokens:
                     evicted_block_id = block_id
                     evicted_content_hash = content_hash
@@ -457,16 +455,18 @@ class CustomizedLRUEvictor(Evictor):
             raise ValueError("No usable cache memory left")
         
         # Put unchosen block back to tail_pq
-        eviction_window.remove(self.free_table[evicted_block_id])
-        for block in eviction_window:
-            heapq.heappush(self.tail_pq, (block.last_accessed, -block.num_hashed_tokens, block.block_id, block.content_hash))
+        del eviction_window[evicted_content_hash]
+        for _, (_, _, block_id, _) in eviction_window.items():
+            self.tail_table.add(block_id, self.free_table[block_id])
 
         # Evict finalist
-        self.active_block.add(evicted_block_id)
         evicted_block = self.free_table.pop(evicted_block_id)
         prev_block_content_hash = evicted_block.prev_block_content_hash
-        if prev_block_content_hash is None:
-            pass
+        assert prev_block_content_hash is not None
+        assert evicted_content_hash in self.next_block[prev_block_content_hash]
+        self.next_block[prev_block_content_hash].remove(evicted_content_hash)
+        if evicted_content_hash in self.tail_table:
+            self.tail_table.update(evicted_content_hash, block_id, self.free_table[block_id])   # ATTN: wrong
 
         return evicted_block_id, evicted_content_hash
 
@@ -474,21 +474,24 @@ class CustomizedLRUEvictor(Evictor):
 
     def add(self, block_id: int, content_hash: int, num_hashed_tokens: int,
             last_accessed: float, prev_block_content_hash: Optional[int] = None):
+        assert prev_block_content_hash is not None
+        assert block_id not in self.free_table and block_id in self.active_block
         self.free_table[block_id] = BlockMetaData(content_hash,
                                                   num_hashed_tokens,
                                                   last_accessed,
                                                   prev_block_content_hash)
+        self.active_block.remove(block_id)
         
-        
-        
-        
-        
-        
-        
-        heapq.heappush(
-            self.priority_queue,
-            (last_accessed, -num_hashed_tokens, block_id, content_hash))
-        self._cleanup_if_necessary()
+        if block_id in self.active_block:
+            pass    # do nothing
+        else:
+            self.next_block[prev_block_content_hash].add(content_hash)
+            if prev_block_content_hash in self.tail_table:
+                self.tail_table.update(prev_block_content_hash, block_id, self.free_table[block_id])
+            else:
+                self.tail_table.add(block_id, self.free_table[block_id])
+
+        # self._cleanup_if_necessary()
 
     def update(self, block_id: int, last_accessed: float):
         assert False

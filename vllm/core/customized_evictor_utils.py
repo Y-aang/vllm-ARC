@@ -8,6 +8,8 @@ Entry = Tuple[float, int, int, int]
 
 
 class TailTable:
+    # A ordered table to record all tail blocks.
+    # # Support: ordered by (last_accessed, ...), add, pop, update.
     CLEANUP_THRESHOLD = 50
 
     __slots__ = ("_heap", "_table")
@@ -38,12 +40,12 @@ class TailTable:
     def pop_last(self) -> Entry:
         while self._heap:
             entry = heapq.heappop(self._heap)
-            _, _, _, content_hash = entry
+            last_accessed, num_hashed_tokens, block_id, content_hash = entry
 
             # verify the entry is still valid only when it matches the item in self._table
-            if self._table.get(content_hash) == entry:
+            if content_hash in self._table and self._table[content_hash] == entry:
                 del self._table[content_hash]
-                return entry
+                return last_accessed, -num_hashed_tokens, block_id, content_hash
 
         raise ValueError("TailTable is empty")
 
