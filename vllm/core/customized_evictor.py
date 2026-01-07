@@ -1,9 +1,9 @@
 import heapq
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Tuple, Optional, Set, Deque
 from vllm.core.evictor import BlockMetaData
 from vllm.core.evictor import Evictor
+from vllm.core.customized_evictor_utils import TailTable
 from collections import OrderedDict, deque
-from typing import Dict, List, Tuple
 import time     # For Debug
 
 class Customized2QEvictor(Evictor):
@@ -423,8 +423,13 @@ class CustomizedLRUEvictor(Evictor):
     CLEANUP_THRESHOLD = 50
 
     def __init__(self):
-        self.free_table: Dict[int, BlockMetaData] = {}
-        self.priority_queue = []
+        self.free_table: Dict[int, BlockMetaData] = {}      # block_id, actual blocks in evictor
+        self.tail_pq: List[Tuple[float, int, int, int]] = []
+        self.tail_table: Dict[int, Tuple[float, int, int, int]] = {}    # key: content_hash
+        self.next_block: Dict[int, int] = {}    # key: content_hash
+        self.active_block: Set[int] = set()     # block_id, free_table + active_block = Full Cache
+
+        self.eviction_window_size = 5
 
     def __contains__(self, block_id: int) -> bool:
         return block_id in self.free_table
@@ -433,14 +438,39 @@ class CustomizedLRUEvictor(Evictor):
         if len(self.free_table) == 0:
             raise ValueError("No usable cache memory left")
 
-        while self.priority_queue:
-            last_accessed, _, block_id, content_hash = heapq.heappop(
-                self.priority_queue)
-            if (block_id in self.free_table and
+        evicted_block_id: int = -1
+        evicted_content_hash: int = -1
+        max_num_hashed_tokens: int = -1
+        eviction_window: Set[Tuple[float, int, int, int]] = set()
+        while len(eviction_window) < self.eviction_window_size and self.tail_pq:
+            last_accessed, num_hashed_tokens, block_id, content_hash = heapq.heappop(
+                self.tail_pq)
+            if (block_id in self.free_table and     # ensure it's not in active_block
                     self.free_table[block_id].last_accessed == last_accessed):
-                self.free_table.pop(block_id)
-                return block_id, content_hash
-        raise ValueError("No usable cache memory left")
+                eviction_window.add(self.free_table[block_id])
+                if not eviction_window or num_hashed_tokens > max_num_hashed_tokens:
+                    evicted_block_id = block_id
+                    evicted_content_hash = content_hash
+                    max_num_hashed_tokens = num_hashed_tokens
+
+        if not eviction_window:
+            raise ValueError("No usable cache memory left")
+        
+        # Put unchosen block back to tail_pq
+        eviction_window.remove(self.free_table[evicted_block_id])
+        for block in eviction_window:
+            heapq.heappush(self.tail_pq, (block.last_accessed, -block.num_hashed_tokens, block.block_id, block.content_hash))
+
+        # Evict finalist
+        self.active_block.add(evicted_block_id)
+        evicted_block = self.free_table.pop(evicted_block_id)
+        prev_block_content_hash = evicted_block.prev_block_content_hash
+        if prev_block_content_hash is None:
+            pass
+
+        return evicted_block_id, evicted_content_hash
+
+
 
     def add(self, block_id: int, content_hash: int, num_hashed_tokens: int,
             last_accessed: float, prev_block_content_hash: Optional[int] = None):
@@ -448,6 +478,13 @@ class CustomizedLRUEvictor(Evictor):
                                                   num_hashed_tokens,
                                                   last_accessed,
                                                   prev_block_content_hash)
+        
+        
+        
+        
+        
+        
+        
         heapq.heappush(
             self.priority_queue,
             (last_accessed, -num_hashed_tokens, block_id, content_hash))
@@ -478,6 +515,7 @@ class CustomizedLRUEvictor(Evictor):
             raise ValueError(
                 "Attempting to remove block that's not in the evictor")
         self.free_table.pop(block_id)
+        self.active_block.add(block_id)
 
     @property
     def num_blocks(self) -> int:
