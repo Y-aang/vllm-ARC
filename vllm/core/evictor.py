@@ -164,7 +164,7 @@ def make_evictor(eviction_policy: EvictionPolicy, num_blocks: int) -> Evictor:
         # return Customized2QEvictor(num_blocks, int(num_blocks * 1.0))     # For Debug Only
         # return CustomizedLRUEvictor()     # For Debug Only
         
-        evictor_type = os.getenv("VLLM_CUSTOMIZED_EVICTOR_TYPE", "LRU").upper()
+        evictor_type = os.getenv("VLLM_CUSTOMIZED_EVICTOR_TYPE", "LRU_L").upper()
         
         if evictor_type == "LRU":
             print("Using LRU evictor")
