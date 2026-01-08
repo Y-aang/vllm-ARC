@@ -37,7 +37,7 @@ class Customized2QEvictor(Evictor):
         raise RuntimeError("No block available to evict")
     
     def add(self, block_id: int, content_hash: int, num_hashed_tokens: int,
-            last_accessed: float, prev_block_content_hash: Optional[int] = None):
+            last_accessed: float, prev_block_id: Optional[int] = None):
         # print('[ADD] len(self.A1in, A1out, Am):', len(self.A1in), len(self.A1out), len(self.Am))
         meta = BlockMetaData(content_hash, num_hashed_tokens, last_accessed)
 
@@ -117,7 +117,7 @@ class CustomizedDBLEvictor(Evictor):
         raise ValueError("No usable cache memory left")
 
     def add(self, block_id: int, content_hash: int, num_hashed_tokens: int, 
-            last_accessed: float, prev_block_content_hash: Optional[int] = None):
+            last_accessed: float, prev_block_id: Optional[int] = None):
         """
         Register a block for future eviction:
         - No eviction should occur here; eviction is driven externally.
@@ -298,7 +298,7 @@ class CustomizedARCEvictor(Evictor):
         
         
     def add(self, block_id: int, content_hash: int, num_hashed_tokens: int, 
-            last_accessed: float, prev_block_content_hash: Optional[int] = None):
+            last_accessed: float, prev_block_id: Optional[int] = None):
         # print(f'add - len T1, T2, B1, B2 | {len(self.T1_table)} ({len(self.T1_active)}) {len(self.T2_table)} ({len(self.T2_active)})  | {len(self.B1)} {len(self.B2)}  | p: {self.p} content_hash: {content_hash}')
         # if len(self.T1_active) < 6 and len(self.T1_active) > 0:
             # print("add - T1_active", self.T1_active)

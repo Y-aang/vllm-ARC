@@ -278,13 +278,16 @@ class PrefixCachingBlockAllocator(BlockAllocator):
         assert block.content_hash in self._cached_blocks
 
         prev_block_content_hash = None
+        prev_block_id = None
         if block.prev_block is not None:
             prev_block_content_hash = block.prev_block.content_hash # TODO: add prev block id
+            assert prev_block_content_hash in self._cached_blocks
+            prev_block_id = self._cached_blocks[prev_block_content_hash]
 
         # Add the cached block to the evictor
         # (This keeps the cached block around so it can be reused)
         self.evictor.add(block_id, block.content_hash, block.num_tokens_total,
-                         self._block_tracker[block_id].last_accessed, prev_block_content_hash)
+                         self._block_tracker[block_id].last_accessed, prev_block_id)
 
         # Stop tracking the block
         self._untrack_block_id(block_id)
