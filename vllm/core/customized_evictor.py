@@ -425,8 +425,8 @@ class CustomizedLRUEvictor(Evictor):
     def __init__(self):
         self.free_table: Dict[int, BlockMetaData] = {}      # block_id, actual blocks in evictor
         self.active_block: Set[int] = set()     # block_id, free_table + active_block = Full Cache
-        self.tail_table: TailTable = TailTable()    # key: content_hash, ordered by (last_accessed, ...)
-        self.next_block: Dict[int, Set[int]] = {}    # key: content_hash
+        self.tail_table: TailTable = TailTable()    # key: block_id, ordered by (last_accessed, ...)
+        self.next_block: Dict[int, Set[int]] = {}    # key: block_id
 
         self.eviction_window_size = 5
 
@@ -440,15 +440,15 @@ class CustomizedLRUEvictor(Evictor):
         evicted_block_id: int = -1
         evicted_content_hash: int = -1
         max_num_hashed_tokens: int = -1
-        eviction_window: Dict[int, Tuple[float, int, int, int]] = {}    # key: content_hash
+        eviction_window: Dict[int, Tuple[float, int, int, int]] = {}    # key: block_id
         while len(eviction_window) < self.eviction_window_size and len(self.tail_table) > 0:
-            last_accessed, num_hashed_tokens, block_id, content_hash = self.tail_table.pop_last()
+            last_accessed, num_hashed_tokens, block_id, _content_hash = self.tail_table.pop_last()
             if (block_id in self.free_table and     # ensure it's not in active_block
                     self.free_table[block_id].last_accessed == last_accessed):
-                eviction_window[content_hash] = (last_accessed, num_hashed_tokens, block_id, content_hash)
+                eviction_window[_content_hash] = (last_accessed, num_hashed_tokens, block_id, _content_hash)
                 if not eviction_window or num_hashed_tokens > max_num_hashed_tokens:
                     evicted_block_id = block_id
-                    evicted_content_hash = content_hash
+                    evicted_content_hash = _content_hash
                     max_num_hashed_tokens = num_hashed_tokens
 
         if not eviction_window:
@@ -460,34 +460,48 @@ class CustomizedLRUEvictor(Evictor):
             self.tail_table.add(block_id, self.free_table[block_id])
 
         # Evict finalist
+        # Delete from free_table
         evicted_block = self.free_table.pop(evicted_block_id)
-        prev_block_content_hash = evicted_block.prev_block_content_hash
-        assert prev_block_content_hash is not None
-        assert evicted_content_hash in self.next_block[prev_block_content_hash]
-        self.next_block[prev_block_content_hash].remove(evicted_content_hash)
-        if evicted_content_hash in self.tail_table:
-            self.tail_table.update(evicted_content_hash, block_id, self.free_table[block_id])   # ATTN: wrong
+        # Process next_block
+        prev_block_id = evicted_block.prev_block_id
+        if prev_block_id is not None:
+            assert evicted_block_id in self.next_block[prev_block_id]
+            self.next_block[prev_block_id].remove(evicted_block_id)
+        # Process tail_table
+        if evicted_block_id in self.tail_table:
+            if prev_block_id is not None:
+                self.tail_table.update(evicted_block_id, block_id, self.free_table[block_id])
+            else:
+                self.tail_table.remove(evicted_block_id)
 
         return evicted_block_id, evicted_content_hash
 
 
 
     def add(self, block_id: int, content_hash: int, num_hashed_tokens: int,
-            last_accessed: float, prev_block_content_hash: Optional[int] = None):
-        assert prev_block_content_hash is not None
-        assert block_id not in self.free_table and block_id in self.active_block
+            last_accessed: float, prev_block_id: Optional[int] = None):
+        # assert prev_block_id is not None
+        assert block_id not in self.free_table
         self.free_table[block_id] = BlockMetaData(content_hash,
                                                   num_hashed_tokens,
                                                   last_accessed,
-                                                  prev_block_content_hash)
-        self.active_block.remove(block_id)
+                                                  prev_block_id)
+        
         
         if block_id in self.active_block:
-            pass    # do nothing
+            self.active_block.remove(block_id)
+            # do nothing
         else:
-            self.next_block[prev_block_content_hash].add(content_hash)
-            if prev_block_content_hash in self.tail_table:
-                self.tail_table.update(prev_block_content_hash, block_id, self.free_table[block_id])
+            # Process next_block
+            if prev_block_id is not None:
+                # self.next_block[prev_block_id].add(block_id)
+                self.next_block.setdefault(prev_block_id, set()).add(block_id)
+            else:
+                pass    # do nothing
+            
+            # Process tail_table
+            if prev_block_id is not None and prev_block_id in self.tail_table:
+                self.tail_table.update(prev_block_id, block_id, self.free_table[block_id])
             else:
                 self.tail_table.add(block_id, self.free_table[block_id])
 
@@ -498,11 +512,13 @@ class CustomizedLRUEvictor(Evictor):
         self.free_table[block_id].last_accessed = last_accessed
 
     def _cleanup_if_necessary(self):
+        assert False
         if len(self.priority_queue) > CustomizedLRUEvictor.CLEANUP_THRESHOLD * len(
                 self.free_table):
             self._cleanup()
 
     def _cleanup(self):
+        assert False
         new_priority_queue: List[Tuple[float, int, int, int]] = []
 
         for block_id, block in self.free_table.items():

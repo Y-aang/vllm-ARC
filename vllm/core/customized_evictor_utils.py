@@ -16,7 +16,7 @@ class TailTable:
 
     def __init__(self):
         self._heap: List[Entry] = []
-        self._table: Dict[int, Entry] = {}  # content_hash -> all tail entry
+        self._table: Dict[int, Entry] = {}  # block_id -> all tail entry
 
     @staticmethod
     def _make_entry(block_id: int, meta: BlockMetaData) -> Entry:
@@ -27,13 +27,13 @@ class TailTable:
             meta.content_hash,
         )
 
-    def __contains__(self, content_hash: int) -> bool:
+    def __contains__(self, block_id: int) -> bool:
         # Suport: if block_id in tail_table
-        return content_hash in self._table
+        return block_id in self._table
 
     def add(self, block_id: int, meta: BlockMetaData) -> None:
         entry = self._make_entry(block_id, meta)
-        self._table[meta.content_hash] = entry
+        self._table[block_id] = entry
         heapq.heappush(self._heap, entry)
         self._cleanup_if_necessary()
 
@@ -43,15 +43,16 @@ class TailTable:
             last_accessed, num_hashed_tokens, block_id, content_hash = entry
 
             # verify the entry is still valid only when it matches the item in self._table
-            if content_hash in self._table and self._table[content_hash] == entry:
-                del self._table[content_hash]
+            if block_id in self._table and self._table[block_id] == entry:
+                del self._table[block_id]
                 return last_accessed, -num_hashed_tokens, block_id, content_hash
 
         raise ValueError("TailTable is empty")
 
-    def update(self, old_content_hash: int, new_block_id: int, meta: BlockMetaData) -> None:
+    def update(self, old_block_id: int, new_block_id: int, meta: BlockMetaData) -> None:
         # lazy delete the old entry by removing the item from self._table
-        self._table.pop(old_content_hash, None)
+        assert old_block_id in self._table
+        self._table.pop(old_block_id)
         # add the new entry
         self.add(new_block_id, meta)
         self._cleanup_if_necessary()
@@ -69,6 +70,15 @@ class TailTable:
         new_heap = list(self._table.values())
         heapq.heapify(new_heap)
         self._heap = new_heap
+
+    def remove(self, block_id: int) -> None:
+        """Remove a block from TailTable.
+
+        This is a lazy remove: it deletes from _table only. Stale entries in
+        _heap will be discarded when popping or during cleanup.
+        """
+        assert block_id in self._table
+        self._table.pop(block_id)
 
     def __len__(self) -> int:
         return len(self._table)
