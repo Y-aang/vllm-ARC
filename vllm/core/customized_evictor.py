@@ -435,6 +435,7 @@ class CustomizedLRUEvictor(Evictor):
         return block_id in self.free_table
 
     def evict(self, content_hash: int = None) -> Tuple[int, int]:
+        # print(f"evict - len free_table, active_block, tail_table, next_block | {len(self.free_table)} {len(self.active_block)} {len(self.tail_table)} {len(self.next_block)}")
         if len(self.free_table) == 0:
             raise ValueError("No usable cache memory left")
 
@@ -478,7 +479,8 @@ class CustomizedLRUEvictor(Evictor):
             assert evicted_block_id in self.next_block[prev_block_id]
             self.next_block[prev_block_id].remove(evicted_block_id)
         # Process tail_table
-        if prev_block_id is not None:
+        if prev_block_id is not None and len(self.next_block[prev_block_id]) == 0:
+            assert prev_block_id in self.free_table or prev_block_id in self.active_block
             self.tail_table.add(prev_block_id, self.free_table[prev_block_id])
             # self.tail_table.update(evicted_block_id, prev_block_id, self.free_table[prev_block_id])
         else:
@@ -492,6 +494,7 @@ class CustomizedLRUEvictor(Evictor):
             last_accessed: float, prev_block_id: Optional[int] = None):
         # assert prev_block_id is not None
         assert block_id not in self.free_table
+        assert prev_block_id is None or (prev_block_id in self.free_table or prev_block_id in self.active_block)
         self.free_table[block_id] = BlockMetaData(content_hash,
                                                   num_hashed_tokens,
                                                   last_accessed,
