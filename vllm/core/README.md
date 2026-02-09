@@ -3,7 +3,7 @@
 ## 🔧 Modified Files & Change Summary
 
 ### `prefix_caching_block.py`
-- Modify interface for ARC to pass the content_hash.
+- Modify interface for ARC to pass the content_hash etc.
 - Print the content_hash for tracing.
 
 ### `Evictor.py`
@@ -20,5 +20,4 @@
 - Add printer for hit rate.
 
 ## 🐞 Hardcoding Notice
-- Manually choose the eviction strategy in `make_evictor()` in `Evictor.py`.
 - Content_hash trace is logged defaultly at: `/home/shenyang/tests/result/block_log.txt`
