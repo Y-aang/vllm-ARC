@@ -2,22 +2,25 @@
 
 ## 🔧 Modified Files & Change Summary
 
-### `prefix_caching_block.py`
+### [`prefix_caching_block.py`](./block/prefix_caching_block.py)
 - Modify interface for ARC to pass the content_hash etc.
-- Print the content_hash for tracing.
+- Print and log content_hash for tracing.
 
-### `Evictor.py`
-- Link the eviction strategies.
+### [`evictor.py`](./evictor.py)
+- Route the eviction strategies.
 
-### `customized_evictor.py`
+### [`customized_evictor.py`](./customized_evictor.py)
 - Implemented DBL, ARC eviction strategy.
 
-### `Common.py`
-- Return completed block hit rate throughout all requests rather than a recent history.
+### [`common.py`](./block/common.py)
+- Return the KV block hit rate throughout all requests rather than the one from a recent history.
 - Potentially print hit rate & hit count for debug. 
 
-### `llm_engine.py`
-- Add printer for hit rate.
+### [`llm_engine.py`](../engine/llm_engine.py)
+- Print the hit rate.
 
-## 🐞 Hardcoding Notice
-- Content_hash trace is logged defaultly at: `/home/shenyang/tests/result/block_log.txt`
+## 📑 Environment Variables
+Control where the block/content-hash trace log is written. For example:
+```
+export BLOCK_LOG_FILE_PATH=/tmp/block_log.txt
+```
