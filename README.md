@@ -1,7 +1,7 @@
 # Recency/Frequency Adaptive KV Caching for Large Language Model Serving
 
 <p align="center">
-  <img src="asset/main-diagram.png" alt="main-diagram" width="80%" />
+  <img src="asset/main-diagram.png" alt="main-diagram" width="100%" />
 </p>
 
 Implementation [Checklist](vllm/core/README.md).
